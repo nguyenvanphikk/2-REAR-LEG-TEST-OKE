@@ -21,7 +21,9 @@
 #include "rt/rt_ethercat.h"
 #include "Utilities/Utilities_print.h"
 
-#define USE_MICROSTRAIN
+// Use the VectorNav VN-100 driver for the Mini Cheetah hardware bridge.
+// Define USE_MICROSTRAIN only when a Microstrain IMU is installed.
+//#define USE_MICROSTRAIN
 
 /*!
  * If an error occurs during initialization, before motors are enabled, print
@@ -383,13 +385,16 @@ void MiniCheetahHardwareBridge::initHardware() {
 #ifndef USE_MICROSTRAIN
   printf("[MiniCheetahHardware] Init vectornav\n");
   if (!init_vectornav(&_vectorNavData)) {
-    printf("Vectornav failed to initialize\n");
-    //initError("failed to initialize vectornav!\n", false);
+    initError("failed to initialize vectornav or receive valid data!\n", false);
   }
 #endif
 
   init_spi();
+#ifdef USE_MICROSTRAIN
   _microstrainInit = _microstrainImu.tryInit(0, 921600);
+#else
+  _microstrainInit = false;
+#endif
 }
 
 void Cheetah3HardwareBridge::initHardware() {

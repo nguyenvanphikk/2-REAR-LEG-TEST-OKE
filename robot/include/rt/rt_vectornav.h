@@ -8,6 +8,7 @@
 
 #ifdef linux
 
+#include <cstdint>
 #include <lcm/lcm-cpp.hpp>
 #include "SimUtilities/IMUTypes.h"
 
@@ -22,6 +23,8 @@ extern "C" {
 #endif
 
 bool init_vectornav(VectorNavData* vd_data);
+bool vectornav_data_is_valid(uint64_t max_age_us);
+uint64_t vectornav_last_packet_age_us();
 
 #endif
 #endif
