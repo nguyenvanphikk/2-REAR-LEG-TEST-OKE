@@ -81,7 +81,10 @@ bool Quadruped<T>::buildModel(FloatingBaseModel<T>& model) {
 
     // Knee Joint
     bodyID++;
-    Mat6<T> xtreeKnee = createSXform(I3, _kneeLocation);
+    // MIT_3HP co do lech ngang hip-knee khac 0. Doi dau thanh phan Y theo chan
+    // trai/phai; cac model co _kneeLocation[Y] bang 0 se khong bi anh huong.
+    Mat6<T> xtreeKnee =
+        createSXform(I3, withLegSigns<T>(_kneeLocation, legID));
     Mat6<T> xtreeKneeRotor = createSXform(I3, _kneeRotorLocation);
     if (sideSign < 0) {
       model.addBody(_kneeInertia.flipAlongAxis(CoordinateAxis::Y),

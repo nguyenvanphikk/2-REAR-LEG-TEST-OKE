@@ -164,7 +164,14 @@ void RobotRunner::run() {
 void RobotRunner::setupStep() {
   // Update the leg data
   if (robotType == RobotType::MINI_CHEETAH) {
-    _legController->updateData(spiData);
+    // Robot that dung chung SpiData voi SPI task. Giu khoa trong thoi gian
+    // updateData() doc tron goi, tranh tron response cua hai chu ky khac nhau.
+    if (spiDataMutex) {
+      std::lock_guard<std::mutex> lock(*spiDataMutex);
+      _legController->updateData(spiData);
+    } else {
+      _legController->updateData(spiData);
+    }
   } else if (robotType == RobotType::CHEETAH_3) {
     _legController->updateData(tiBoardData);
   } else {
@@ -203,7 +210,14 @@ void RobotRunner::setupStep() {
  */
 void RobotRunner::finalizeStep() {
   if (robotType == RobotType::MINI_CHEETAH) {
-    _legController->updateCommand(spiCommand);
+    // Tao tron goi command trong mot lan khoa ngan. SPI task chi lay snapshot
+    // sau khi updateCommand() da ghi xong ca 12 khop.
+    if (spiDataMutex) {
+      std::lock_guard<std::mutex> lock(*spiDataMutex);
+      _legController->updateCommand(spiCommand);
+    } else {
+      _legController->updateCommand(spiCommand);
+    }
   } else if (robotType == RobotType::CHEETAH_3) {
     _legController->updateCommand(tiBoardCommand);
   } else {

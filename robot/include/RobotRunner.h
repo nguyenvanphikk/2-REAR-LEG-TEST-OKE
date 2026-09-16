@@ -26,6 +26,7 @@
 #include "state_estimator_lcmt.hpp"
 #include "RobotController.h"
 #include <lcm-cpp.hpp>
+#include <mutex>
 
 class RobotRunner : public PeriodicTask {
  public:
@@ -49,6 +50,8 @@ class RobotRunner : public PeriodicTask {
   CheaterState<double>* cheaterState;
   SpiData* spiData;
   SpiCommand* spiCommand;
+  // Chi duoc gan khi chay robot that. Simulation khong can mutex nay.
+  std::mutex* spiDataMutex = nullptr;
   TiBoardCommand* tiBoardCommand;
   TiBoardData* tiBoardData;
   RobotControlParameters* controlParameters;

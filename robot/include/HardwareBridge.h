@@ -15,6 +15,7 @@
 #define TASK_PRIORITY 49      // linux priority, this is not the nice value
 
 #include <string>
+#include <mutex>
 #include <lcm-cpp.hpp>
 #include <lord_imu/LordImu.h>
 
@@ -66,8 +67,12 @@ class HardwareBridge {
   lcm::LCM _interfaceLCM;
   lcm::LCM _visualizationLCM;
   control_parameter_respones_lcmt _parameter_response_lcmt;
-  SpiData _spiData;
-  SpiCommand _spiCommand;
+  // Du lieu chia se giua controller task va SPI task. Khoi tao ve 0 de
+  // controller khong doc gia tri rac neu chay truoc transaction SPI dau tien.
+  SpiData _spiData{};
+  SpiCommand _spiCommand{};
+  // Mutex nay chi bao ve luc sao chep snapshot; khong duoc giu khi ioctl().
+  std::mutex _spiDataMutex;
 
   TiBoardCommand _tiBoardCommand[4];
   TiBoardData _tiBoardData[4];

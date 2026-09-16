@@ -296,6 +296,7 @@ void MiniCheetahHardwareBridge::run() {
   _robotRunner->driverCommand = &_gamepadCommand;
   _robotRunner->spiData = &_spiData;
   _robotRunner->spiCommand = &_spiCommand;
+  _robotRunner->spiDataMutex = &_spiDataMutex;
   _robotRunner->robotType = RobotType::MINI_CHEETAH;
   _robotRunner->vectorNavData = &_vectorNavData;
   _robotRunner->controlParameters = &_robotParams;
@@ -418,9 +419,23 @@ void MiniCheetahHardwareBridge::runSpi() {
   spi_command_t* cmd = get_spi_command();
   spi_data_t* data = get_spi_data();
 
-  memcpy(cmd, &_spiCommand, sizeof(spi_command_t));
+  // Lay mot snapshot command hoan chinh. Chi giu mutex trong luc memcpy de
+  // controller khong bi chan trong thoi gian truyen hai board SPI.
+  {
+    std::lock_guard<std::mutex> lock(_spiDataMutex);
+    memcpy(cmd, &_spiCommand, sizeof(spi_command_t));
+  }
+
+  // spi_driver_run() truyen board 0 roi board 1 trong cung mot SPI task.
+  // Tuyet doi khong giu _spiDataMutex khi ioctl() dang cho phan cung.
   spi_driver_run();
-  memcpy(&_spiData, data, sizeof(spi_data_t));
+
+  // Chi cong bo response sau khi ca transaction da hoan tat. Controller se
+  // khong the doc mot goi gom mot phan du lieu cu va mot phan du lieu moi.
+  {
+    std::lock_guard<std::mutex> lock(_spiDataMutex);
+    memcpy(&_spiData, data, sizeof(spi_data_t));
+  }
 
   _spiLcm.publish("spi_data", data);
   _spiLcm.publish("spi_command", cmd);

@@ -21,7 +21,9 @@ class RobotState
         Matrix<fpt,3,3> I_body;
         Quaternionf q;
         fpt yaw;
-        fpt m = 9;
+        // Tong khoi luong robot MIT_3HP theo URDF, don vi kg. Dense MPC dung
+        // gia tri nay trong quan he gia toc tinh tien = tong luc chan / mass.
+        fpt m = 10.865863917f;
         //fpt m = 50.236; //DH
     //private:
 };

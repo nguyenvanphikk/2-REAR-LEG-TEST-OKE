@@ -65,15 +65,23 @@ TEST(LegController, FwdKinematicsLegSign) {
   Vec3<double> p;
   computeLegJacobianAndPosition(quadruped, q, (Mat3<double>*)nullptr, &p, 0);
 
-  Vec3<double> pRef(0, -quadruped._abadLinkLength + quadruped.getSideSign(0) * quadruped._kneeLinkY_offset,
-                    -quadruped._hipLinkLength - quadruped._kneeLinkLength);
+  Vec3<double> pRef(
+      quadruped._hipLocation[0],
+      quadruped.getSideSign(0) *
+          (quadruped._hipLocation[1] + quadruped._kneeLocation[1] +
+           quadruped._kneeLinkY_offset),
+      quadruped._kneeLocation[2] - quadruped._kneeLinkLength);
 
   EXPECT_TRUE(almostEqual(pRef, p, .00001));
 
   computeLegJacobianAndPosition(quadruped, q, (Mat3<double>*)nullptr, &p, 1);
 
-  Vec3<double> pRef2(0, quadruped._abadLinkLength + quadruped.getSideSign(1) * quadruped._kneeLinkY_offset,
-                     -quadruped._hipLinkLength - quadruped._kneeLinkLength);
+  Vec3<double> pRef2(
+      quadruped._hipLocation[0],
+      quadruped.getSideSign(1) *
+          (quadruped._hipLocation[1] + quadruped._kneeLocation[1] +
+           quadruped._kneeLinkY_offset),
+      quadruped._kneeLocation[2] - quadruped._kneeLinkLength);
 
   EXPECT_TRUE(almostEqual(pRef2, p, .00001));
 }

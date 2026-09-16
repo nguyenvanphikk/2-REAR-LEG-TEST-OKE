@@ -273,10 +273,10 @@ TEST(MiniCheetah, simulatorFootPosVelMiniCheetah) {
  */
 TEST(MiniCheetah, hipLocationConvention) {
   Vec3<double> hipLocationRef[4];
-  hipLocationRef[0] = Vec3<double>(0.19, -0.049, 0.0);
-  hipLocationRef[1] = Vec3<double>(0.19, 0.049, 0.0);
-  hipLocationRef[2] = Vec3<double>(-0.19, -0.049, 0.0);
-  hipLocationRef[3] = Vec3<double>(-0.19, 0.049, 0.0);
+  hipLocationRef[0] = Vec3<double>(0.1513, -0.0500, 0.0);
+  hipLocationRef[1] = Vec3<double>(0.1513, 0.0500, 0.0);
+  hipLocationRef[2] = Vec3<double>(-0.1513, -0.0500, 0.0);
+  hipLocationRef[3] = Vec3<double>(-0.1513, 0.0500, 0.0);
 
   Vec3<double> hipLocations[4];
 

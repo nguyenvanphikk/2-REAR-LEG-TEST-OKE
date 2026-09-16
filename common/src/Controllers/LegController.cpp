@@ -264,10 +264,14 @@ template class LegController<float>;
 template <typename T>
 void computeLegJacobianAndPosition(Quadruped<T>& quad, Vec3<T>& q, Mat3<T>* J,
                                    Vec3<T>* p, int leg) {
-  T l1 = quad._abadLinkLength;
-  T l2 = quad._hipLinkLength;
+  // Cac do lech co dinh lay tu URDF. hipOffsetX doi dau theo chan truoc/sau;
+  // ba do lech ngang quay cung nhau quanh truc ab/ad.
+  T hipOffsetX = quad._hipLocation[0] * ((leg < 2) ? T(1) : T(-1));
+  T lateralOffset = quad._hipLocation[1] + quad._kneeLocation[1] +
+                    quad._kneeLinkY_offset;
+  // Thanh phan doc hip-knee thay cho mo hinh cu chi dung chieu dai vo huong.
+  T l2 = -quad._kneeLocation[2];
   T l3 = quad._kneeLinkLength;
-  T l4 = quad._kneeLinkY_offset;
   T sideSign = quad.getSideSign(leg);
 
   T s1 = std::sin(q(0));
@@ -285,18 +289,22 @@ void computeLegJacobianAndPosition(Quadruped<T>& quad, Vec3<T>& q, Mat3<T>* J,
     J->operator()(0, 0) = 0;
     J->operator()(0, 1) = l3 * c23 + l2 * c2;
     J->operator()(0, 2) = l3 * c23;
-    J->operator()(1, 0) = l3 * c1 * c23 + l2 * c1 * c2 - (l1+l4) * sideSign * s1;
+    J->operator()(1, 0) = l3 * c1 * c23 + l2 * c1 * c2 -
+                          lateralOffset * sideSign * s1;
     J->operator()(1, 1) = -l3 * s1 * s23 - l2 * s1 * s2;
     J->operator()(1, 2) = -l3 * s1 * s23;
-    J->operator()(2, 0) = l3 * s1 * c23 + l2 * c2 * s1 + (l1+l4) * sideSign * c1;
+    J->operator()(2, 0) = l3 * s1 * c23 + l2 * c2 * s1 +
+                          lateralOffset * sideSign * c1;
     J->operator()(2, 1) = l3 * c1 * s23 + l2 * c1 * s2;
     J->operator()(2, 2) = l3 * c1 * s23;
   }
 
   if (p) {
-    p->operator()(0) = l3 * s23 + l2 * s2;
-    p->operator()(1) = (l1+l4) * sideSign * c1 + l3 * (s1 * c23) + l2 * c2 * s1;
-    p->operator()(2) = (l1+l4) * sideSign * s1 - l3 * (c1 * c23) - l2 * c1 * c2;
+    p->operator()(0) = hipOffsetX + l3 * s23 + l2 * s2;
+    p->operator()(1) = lateralOffset * sideSign * c1 +
+                       l3 * (s1 * c23) + l2 * c2 * s1;
+    p->operator()(2) = lateralOffset * sideSign * s1 -
+                       l3 * (c1 * c23) - l2 * c1 * c2;
   }
 }
 

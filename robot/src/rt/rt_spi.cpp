@@ -5,6 +5,8 @@
 #ifdef linux
 
 #include <byteswap.h>
+#include <errno.h>
+#include <inttypes.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -16,7 +18,7 @@
 
 unsigned char spi_mode = SPI_MODE_0;
 unsigned char spi_bits_per_word = 8;
-unsigned int spi_speed = 6000000;
+unsigned int spi_speed = 6000000;  // 6 MHz
 uint8_t lsb = 0x01;
 
 int spi_1_fd = -1;
@@ -40,7 +42,10 @@ const float disabled_torque[3] = {0.f, 0.f, 0.f};
 // only used for actual robot
 const float abad_side_sign[4] = {-1.f, -1.f, 1.f, 1.f};
 const float hip_side_sign[4] = {-1.f, 1.f, -1.f, 1.f};
-const float knee_side_sign[4] = {-.6429f, .6429f, -.6429f, .6429f};
+// Do lon 1/1.5 quy doi goc/toc do tu dau ra motor sang khop knee qua bo
+// truyen dai 1.5:1. Dau +/- tam giu theo mapping cu va se hieu chuan thuc te.
+const float knee_side_sign[4] = {-0.6666667f, 0.6666667f, -0.6666667f,
+                                 0.6666667f};
 
 // only used for actual robot
 const float abad_offset[4] = {0.f, 0.f, 0.f, 0.f};
@@ -146,10 +151,13 @@ void init_spi() {
  */
 int spi_open() {
   int rv = 0;
-  spi_1_fd = open("/dev/spidev2.0", O_RDWR);
-  if (spi_1_fd < 0) perror("[ERROR] Couldn't open spidev 2.0");
-  spi_2_fd = open("/dev/spidev2.1", O_RDWR);
-  if (spi_2_fd < 0) perror("[ERROR] Couldn't open spidev 2.1");
+  // MIT_3HP Jetson wiring (physical header pins):
+  // SCK: 13, MISO: 22, MOSI: 37, GND: 39.
+  // CS0: 18 -> A2; CS1: 16. Pinmux must be configured on the Jetson.
+  spi_1_fd = open("/dev/spidev1.0", O_RDWR);
+  if (spi_1_fd < 0) perror("[ERROR] Couldn't open spidev 1.0");
+  spi_2_fd = open("/dev/spidev1.1", O_RDWR);
+  if (spi_2_fd < 0) perror("[ERROR] Couldn't open spidev 1.1");
 
   rv = ioctl(spi_1_fd, SPI_IOC_WR_MODE, &spi_mode);
   if (rv < 0) perror("[ERROR] ioctl spi_ioc_wr_mode (1)");
@@ -247,6 +255,15 @@ void spi_to_spine(spi_command_t *cmd, spine_cmd_t *spine_cmd, int leg_0) {
  * convert spine_data_t to spi data
  */
 void spine_to_spi(spi_data_t *data, spine_data_t *spine_data, int leg_0) {
+  const uint32_t calculated = xor_checksum((uint32_t *)spine_data, 14);
+  const uint32_t received = (uint32_t)spine_data->checksum;
+  if (calculated != received) {
+    printf("[ERROR: RT SPI] /dev/spidev1.%d response checksum mismatch: "
+           "received=0x%08" PRIx32 " calculated=0x%08" PRIx32
+           "; response discarded\n", leg_0 / 2, received, calculated);
+    return;
+  }
+
   for (int i = 0; i < 2; i++) {
     data->q_abad[i + leg_0] = (spine_data->q_abad[i] - abad_offset[i + leg_0]) *
                               abad_side_sign[i + leg_0];
@@ -264,10 +281,6 @@ void spine_to_spi(spi_data_t *data, spine_data_t *spine_data, int leg_0) {
     data->flags[i + leg_0] = spine_data->flags[i];
   }
 
-  uint32_t calc_checksum = xor_checksum((uint32_t *)spine_data, 14);
-  if (calc_checksum != (uint32_t)spine_data->checksum)
-    printf("SPI ERROR BAD CHECKSUM GOT 0x%hx EXPECTED 0x%hx\n", calc_checksum,
-           spine_data->checksum);
 }
 
 /*!
@@ -299,7 +312,8 @@ void spi_send_receive(spi_command_t *command, spi_data_t *data) {
     // tx_buf[i] = __bswap_16(cmd_d[i]);
 
     // each word is two bytes long
-    size_t word_len = 2;  // 16 bit word
+    constexpr size_t transfer_bytes = K_WORDS_PER_MESSAGE * sizeof(uint16_t);
+    static_assert(transfer_bytes == 132, "SPI transaction must be 132 bytes");
 
     // spi message struct
     struct spi_ioc_transfer spi_message[1];
@@ -310,9 +324,9 @@ void spi_send_receive(spi_command_t *command, spi_data_t *data) {
     // set up message struct
     for (int i = 0; i < 1; i++) {
       spi_message[i].bits_per_word = spi_bits_per_word;
-      spi_message[i].cs_change = 1;
+      spi_message[i].cs_change = 0;  // Release CS after this message.
       spi_message[i].delay_usecs = 0;
-      spi_message[i].len = word_len * 66;
+      spi_message[i].len = transfer_bytes;
       spi_message[i].rx_buf = (uint64_t)rx_buf;
       spi_message[i].tx_buf = (uint64_t)tx_buf;
     }
@@ -320,7 +334,19 @@ void spi_send_receive(spi_command_t *command, spi_data_t *data) {
     // do spi communication
     int rv = ioctl(spi_board == 0 ? spi_1_fd : spi_2_fd, SPI_IOC_MESSAGE(1),
                    &spi_message);
-    (void)rv;
+    if (rv < 0) {
+      const int saved_errno = errno;
+      printf("[ERROR: RT SPI] /dev/spidev1.%d ioctl failed: %s (errno=%d); "
+             "expected %zu bytes; response discarded\n",
+             spi_board, strerror(saved_errno), saved_errno, transfer_bytes);
+      continue;
+    }
+    if (rv != static_cast<int>(transfer_bytes)) {
+      printf("[ERROR: RT SPI] /dev/spidev1.%d incomplete transfer: "
+             "got %d bytes, expected %zu; response discarded\n",
+             spi_board, rv, transfer_bytes);
+      continue;
+    }
 
     // flip bytes the other way
     for (int i = 0; i < 30; i++)
