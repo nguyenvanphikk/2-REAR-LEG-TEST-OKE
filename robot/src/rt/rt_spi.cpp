@@ -47,11 +47,12 @@ const float hip_side_sign[4] = {-1.f, 1.f, -1.f, 1.f};
 const float knee_side_sign[4] = {-0.6666667f, 0.6666667f, -0.6666667f,
                                  0.6666667f};
 
-// only used for actual robot
+// MIT_3HP dat moc q = 0 khi tung khop o tu the chan duoi thang. Sau khi set
+// zero truc tiep cho du 12 motor, encoder raw tai tu the nay phai gan bang 0,
+// vi vay Jetson khong cong/tru offset co khi cua Mini Cheetah nua.
 const float abad_offset[4] = {0.f, 0.f, 0.f, 0.f};
-const float hip_offset[4] = {M_PI / 2.f, -M_PI / 2.f, -M_PI / 2.f, M_PI / 2.f};
-const float knee_offset[4] = {K_KNEE_OFFSET_POS, -K_KNEE_OFFSET_POS,
-                              -K_KNEE_OFFSET_POS, K_KNEE_OFFSET_POS};
+const float hip_offset[4] = {0.f, 0.f, 0.f, 0.f};
+const float knee_offset[4] = {0.f, 0.f, 0.f, 0.f};
 
 /*!
  * Compute SPI message checksum

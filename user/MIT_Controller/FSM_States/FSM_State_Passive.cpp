@@ -31,6 +31,9 @@ void FSM_State_Passive<T>::onEnter() {
 
   // Reset the transition data
   this->transitionData.zero();
+
+  // PASSIVE cua MIT_3HP phai gui flags = 0, khong chi gui gain/torque bang 0.
+  this->_data->_legController->setEnabled(false);
 }
 
 /**
@@ -38,7 +41,9 @@ void FSM_State_Passive<T>::onEnter() {
  */
 template <typename T>
 void FSM_State_Passive<T>::run() {
-  // Do nothing, all commands should begin as zeros
+  // setupStep() bat enable mac dinh cho cac state dieu khien, vi vay PASSIVE
+  // phai ep tat lai moi chu ky truoc khi dong goi command SPI.
+  this->_data->_legController->setEnabled(false);
   testTransition();
 }
 
@@ -104,6 +109,9 @@ FSM_StateName FSM_State_Passive<T>::checkTransition() {
  */
 template <typename T>
 TransitionData<T> FSM_State_Passive<T>::transition() {
+  // Giu motor disable trong chinh chu ky chuyen state. State moi chi enable
+  // motor o chu ky dieu khien tiep theo sau lenh chu dong cua nguoi dung.
+  this->_data->_legController->setEnabled(false);
   // Finish Transition
   this->transitionData.done = true;
 

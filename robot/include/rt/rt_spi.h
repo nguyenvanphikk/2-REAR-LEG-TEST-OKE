@@ -34,8 +34,6 @@ extern "C" {
 #define K_EXPECTED_COMMAND_SIZE 256
 #define K_WORDS_PER_MESSAGE 66
 #define K_EXPECTED_DATA_SIZE 116
-#define K_KNEE_OFFSET_POS 4.35f
-
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)                                \
   (byte & 0x80 ? '1' : '0'), (byte & 0x40 ? '1' : '0'),     \
@@ -93,4 +91,3 @@ typedef struct {
 #endif // END of #ifdef linux
 
 #endif
-

@@ -107,36 +107,19 @@ void RobotRunner::run() {
       for (int leg = 0; leg < 4; leg++) {
         _legController->commands[leg].zero();
       }
+      // Bao dam nhanh enable gui xuong STM32 bang 0 trong nhanh E-stop.
+      _legController->setEnabled(false);
       _robot_ctrl->Estop();
     }else {
-      // Controller
-      if (!_jpos_initializer->IsInitialized(_legController)) {
-        Mat3<float> kpMat;
-        Mat3<float> kdMat;
-        // Update the jpos feedback gains
-        if (robotType == RobotType::MINI_CHEETAH) {
-          kpMat << 5, 0, 0, 0, 5, 0, 0, 0, 5;
-          kdMat << 0.1, 0, 0, 0, 0.1, 0, 0, 0, 0.1;
-        } else if (robotType == RobotType::CHEETAH_3) {
-          kpMat << 50, 0, 0, 0, 50, 0, 0, 0, 50;
-          kdMat << 1, 0, 0, 0, 1, 0, 0, 0, 1;
-        } else {
-          assert(false);
-        } 
+      // MIT_3HP khong tu chay JPosInitializer khi khoi dong. Duong mid_jpos
+      // cua Mini Cheetah co goc ab/ad vuot gioi han co khi MIT_3HP. FSM bat dau
+      // o PASSIVE; motor chi duoc enable sau khi nguoi dung chon state khac.
+      _robot_ctrl->runController();
+      cheetahMainVisualization->p = _stateEstimate.position;
 
-        for (int leg = 0; leg < 4; leg++) {
-          _legController->commands[leg].kpJoint = kpMat;
-          _legController->commands[leg].kdJoint = kdMat;
-        }
-      } else {
-        // Run Control 
-        _robot_ctrl->runController();
-        cheetahMainVisualization->p = _stateEstimate.position;
-
-        // Update Visualization
-        _robot_ctrl->updateVisualization();
-        cheetahMainVisualization->p = _stateEstimate.position;
-      }
+      // Update Visualization
+      _robot_ctrl->updateVisualization();
+      cheetahMainVisualization->p = _stateEstimate.position;
     }
 
   }

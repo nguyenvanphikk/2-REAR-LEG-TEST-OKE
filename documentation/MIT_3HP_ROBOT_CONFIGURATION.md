@@ -308,3 +308,5 @@ Chỉ sửa khi các thông số liên quan đã được xác nhận.
 | 2026-09-16 | Bước 5: thêm mutex snapshot giữa controller và SPI task; không khóa trong `ioctl()` | Đã thực hiện, build `robot` đạt |
 | 2026-09-16 | Bước 6: đổi tổng khối lượng Dense Convex MPC từ 9 kg thành 10.865863917 kg theo URDF | Đã thực hiện |
 | 2026-09-16 | Đổi độ lớn hệ số quy đổi knee trong SPI từ 0.6429 thành 1/1.5 = 0.6666667; dấu từng chân vẫn chờ đo | Đã thực hiện |
+| 2026-09-16 | Bỏ qua JPosInitializer tự động; PASSIVE và nhánh RC E-stop ép `flags = 0` | Đã thực hiện |
+| 2026-09-16 | Đặt offset abad/hip/knee trên Jetson bằng 0 theo phương án set zero đủ 12 motor tại tư thế chân duỗi thẳng | Đã cấu hình; chờ hiệu chuẩn phần cứng |
