@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(sim)
 
 SET(CMAKE_INCLUDE_CURRENT_DIR ON)
+include_directories(BEFORE ${CMAKE_BINARY_DIR})
 
 
 execute_process(COMMAND ${CMAKE_SOURCE_DIR}/scripts/find_qt_path.sh OUTPUT_VARIABLE CMAKE_PREFIX_PATH_1)
@@ -40,6 +41,9 @@ include_directories("/usr/include/lcm/")   # lcm includes
 include_directories("../third-party/ParamHandler")
 include_directories(${CMAKE_BINARY_DIR})
 file(GLOB sources "src/*.cpp")
+list(REMOVE_ITEM sources
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/mit3hp_gui_main.cpp"
+     "${CMAKE_CURRENT_SOURCE_DIR}/src/Mit3hpControlPanel.cpp")
 
 find_package(Qt5Core COMPONENTS QtGamepad REQUIRED)
 find_package(Qt5Gamepad REQUIRED)
@@ -62,3 +66,15 @@ if (APPLE)
   target_link_libraries(sim "-framework GLUT")
 endif (APPLE)
 
+# Giao dien van hanh robot that MIT_3HP. Target doc lap voi simulator cu,
+# chi gui lenh va nhan telemetry qua LCM.
+QT5_WRAP_CPP(mit3hp_gui_moc include/Mit3hpControlPanel.h)
+qt5_add_resources(mit3hp_gui_resources assets/mit3hp_assets.qrc)
+add_executable(mit3hp_gui
+  src/mit3hp_gui_main.cpp
+  src/Mit3hpControlPanel.cpp
+  ${mit3hp_gui_moc}
+  ${mit3hp_gui_resources})
+add_dependencies(mit3hp_gui generate_mit3hp_lcm)
+target_link_libraries(mit3hp_gui biomimetics pthread lcm
+  Qt5::Widgets Qt5::Core Qt5::Gui)

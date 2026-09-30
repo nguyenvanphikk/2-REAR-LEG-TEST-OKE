@@ -142,9 +142,9 @@ void ConvexMPCLocomotion::run(ControlFSMData<float>& data) {
   else if(gaitNumber == 5)
     gait = &trotRunning;
   else if(gaitNumber == 6)
-    gait = &random2;
+    gait = &walking;
   else if(gaitNumber == 7)
-    gait = &random2;
+    gait = &walking2;
   else if(gaitNumber == 8)
     gait = &pacing;
   current_gait = gaitNumber;
@@ -701,4 +701,3 @@ void ConvexMPCLocomotion::initSparseMPC() {
 
   _sparseTrajectory.resize(horizonLength);
 }
-

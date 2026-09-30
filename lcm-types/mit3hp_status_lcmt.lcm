@@ -1,0 +1,18 @@
+struct mit3hp_status_lcmt {
+  int64_t timestamp_us;
+  int32_t fsm_state;
+  int32_t requested_mode;
+  int32_t motors_enabled;
+  int32_t gui_watchdog_ok;
+  int32_t safety_reason;
+  int64_t spi_tx_frames[2];
+  int32_t spi_tx_flags[2];
+  int64_t spi_success[2];
+  int64_t spi_ioctl_errors[2];
+  int64_t spi_short_transfers[2];
+  int64_t spi_checksum_errors[2];
+  int64_t spi_all_zero_responses[2];
+  int64_t spi_checksum_mismatches[2];
+  int64_t spi_implausible_feedback[2];
+  int64_t spi_last_success_us[2];
+}

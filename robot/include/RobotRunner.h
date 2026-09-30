@@ -13,6 +13,7 @@
 #include "Controllers/StateEstimatorContainer.h"
 #include "SimUtilities/IMUTypes.h"
 #include "rt/rt_rc_interface.h"
+#include "rt/rt_spi.h"
 #include "Controllers/ContactEstimator.h"
 #include "Controllers/DesiredStateCommand.h"
 #include "Controllers/LegController.h"
@@ -24,9 +25,11 @@
 #include "Utilities/PeriodicTask.h"
 #include "cheetah_visualization_lcmt.hpp"
 #include "state_estimator_lcmt.hpp"
+#include "mit3hp_status_lcmt.hpp"
 #include "RobotController.h"
 #include <lcm-cpp.hpp>
 #include <mutex>
+#include <atomic>
 
 class RobotRunner : public PeriodicTask {
  public:
@@ -52,6 +55,9 @@ class RobotRunner : public PeriodicTask {
   SpiCommand* spiCommand;
   // Chi duoc gan khi chay robot that. Simulation khong can mutex nay.
   std::mutex* spiDataMutex = nullptr;
+  std::mutex* spiHealthMutex = nullptr;
+  spi_board_health_t* spiHealth = nullptr;
+  std::atomic<uint64_t>* lastGuiCommandUs = nullptr;
   TiBoardCommand* tiBoardCommand;
   TiBoardData* tiBoardData;
   RobotControlParameters* controlParameters;
@@ -77,11 +83,15 @@ class RobotRunner : public PeriodicTask {
   lcm::LCM _lcm;
   leg_control_command_lcmt leg_control_command_lcm;
   state_estimator_lcmt state_estimator_lcm;
+  mit3hp_status_lcmt mit3hp_status_lcm;
   leg_control_data_lcmt leg_control_data_lcm;
   // Contact Estimator to calculate estimated forces and contacts
 
   FloatingBaseModel<float> _model;
   u64 _iterations = 0;
+  bool _guiWatchdogOk = true;
+  int _safetyReason = 0;
+  spi_board_health_t _spiHealthSnapshot[2]{};
 };
 
 #endif  // PROJECT_ROBOTRUNNER_H

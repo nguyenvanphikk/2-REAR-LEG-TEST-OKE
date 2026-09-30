@@ -21,11 +21,11 @@ Nếu thông tin mới khác file này, thông tin mới do chủ robot cung c�
 | Tham số | Giá trị |
 |---|---|
 | SPI mode | `SPI_MODE_0` |
-| Bits/word | 8 |
-| Tốc độ | 6 MHz (`6000000` Hz) |
+| Bits/word | 8 trên Jetson; STM32 ghép thành 16 bit/word |
+| Tốc độ | 1 MHz (`1000000` Hz) |
 | Board 0 / CS0 | `/dev/spidev1.0` |
 | Board 1 / CS1 | `/dev/spidev1.1` |
-| Kích thước mỗi transaction | 132 byte |
+| Kích thước mỗi transaction | 132 byte; một `SPI_IOC_MESSAGE(1)` |
 | `cs_change` | `0` — nhả CS sau mỗi message |
 | CS polarity | Active LOW |
 | Thứ tự truyền | Board 0 rồi board 1, tuần tự trong một SPI task |
@@ -310,3 +310,39 @@ Chỉ sửa khi các thông số liên quan đã được xác nhận.
 | 2026-09-16 | Đổi độ lớn hệ số quy đổi knee trong SPI từ 0.6429 thành 1/1.5 = 0.6666667; dấu từng chân vẫn chờ đo | Đã thực hiện |
 | 2026-09-16 | Bỏ qua JPosInitializer tự động; PASSIVE và nhánh RC E-stop ép `flags = 0` | Đã thực hiện |
 | 2026-09-16 | Đặt offset abad/hip/knee trên Jetson bằng 0 theo phương án set zero đủ 12 motor tại tư thế chân duỗi thẳng | Đã cấu hình; chờ hiệu chuẩn phần cứng |
+# Giao dien dieu khien tren Jetson
+
+Build:
+
+```bash
+cd build-sim
+cmake ..
+cmake --build . --target mit3hp_gui -j4
+```
+
+Chay GUI:
+
+```bash
+./scripts/run_mit3hp_gui.sh
+```
+
+Chay controller robot that trong terminal khac:
+
+```bash
+cd jetson-build
+sudo LD_LIBRARY_PATH=. ./user/MIT_Controller/mit_ctrl m r f
+```
+
+GUI gui heartbeat 20 Hz. Khi `use_rc: 0`, neu RobotRunner khong nhan heartbeat
+trong 300 ms thi tu dong dat `control_mode = PASSIVE`, xoa lenh joystick va tat
+flags dong co. Trinh tu state tren GUI la PASSIVE -> STAND_UP -> BALANCE_STAND
+-> LOCOMOTION. Recovery, backflip va jump khong duoc dua vao GUI MIT_3HP.
+
+Watchdog SPI phia Jetson dung timeout 100 ms cho tung board. Qua timeout, FSM
+ve PASSIVE va thread SPI ep `flags = 0` cho ca hai board. GUI hien thi tan so,
+tuoi response hop le va bo dem ioctl/thieu 132 byte/checksum cua tung board.
+
+Firmware STM32 van phai co watchdog rieng: neu khong nhan duoc command SPI hop
+le trong timeout da thu nghiem thi dat `tau=0`, `Kp=0`, `Kd=0` va disable 6
+motor cua board. Nút E-stop vat ly phai ngat enable hoac nguon cong suat 24 V.
+Hai muc nay khong nam trong source Jetson va khong duoc thay the boi GUI.

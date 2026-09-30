@@ -96,7 +96,10 @@ void SimulationBridge::handleControlParameters() {
 
   // sanity check
   u64 nRequests = request.requestNumber - response.requestNumber;
-  assert(nRequests == 1);
+  if (nRequests != 1) {
+    throw std::runtime_error(
+        "Simulation control parameter requests are out of sequence");
+  }
 
   response.nParameters = _robotParams.collection._map
                              .size();  // todo don't do this every single time?

@@ -2,6 +2,23 @@
 
 MIT_Controller::MIT_Controller():RobotController(){  }
 
+int MIT_Controller::getControllerMode() const {
+  if (!_controlFSM || !_controlFSM->currentState) return K_PASSIVE;
+  switch (_controlFSM->currentState->stateName) {
+    case FSM_StateName::PASSIVE: return K_PASSIVE;
+    case FSM_StateName::STAND_UP: return K_STAND_UP;
+    case FSM_StateName::BALANCE_STAND: return K_BALANCE_STAND;
+    case FSM_StateName::LOCOMOTION: return K_LOCOMOTION;
+    case FSM_StateName::RECOVERY_STAND: return K_RECOVERY_STAND;
+    case FSM_StateName::VISION: return K_VISION;
+    case FSM_StateName::BACKFLIP: return K_BACKFLIP;
+    case FSM_StateName::FRONTJUMP: return K_FRONTJUMP;
+    case FSM_StateName::JOINT_PD: return K_JOINT_PD;
+    case FSM_StateName::IMPEDANCE_CONTROL: return K_IMPEDANCE_CONTROL;
+    default: return K_INVALID;
+  }
+}
+
 //#define RC_ESTOP
 /**
  * Initializes the Control FSM.
@@ -34,5 +51,4 @@ void MIT_Controller::runController() {
   // Run the Control FSM code
   _controlFSM->runFSM();
 }
-
 

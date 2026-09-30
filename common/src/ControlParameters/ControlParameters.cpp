@@ -366,35 +366,38 @@ void ControlParameters::defineAndInitializeFromYamlFile(const std::string &path)
     collection.addParameter(cp, key);
     switch (cp->_kind) {
       case ControlParameterValueKind::DOUBLE: {
-        double d;
-        assert(paramHandler.getValue(key, d));
+        double d = 0.;
+        if (!paramHandler.getValue(key, d))
+          throw std::runtime_error("can't read parameter " + key);
         cp->initializeDouble(d);
       } break;
 
       case ControlParameterValueKind::FLOAT: {
-        float f;
-        assert(paramHandler.getValue(key, f));
+        float f = 0.f;
+        if (!paramHandler.getValue(key, f))
+          throw std::runtime_error("can't read parameter " + key);
         cp->initializeFloat(f);
       } break;
 
       case ControlParameterValueKind::S64: {
-        s64 f;
-        assert(paramHandler.getValue(key, f));
+        s64 f = 0;
+        if (!paramHandler.getValue(key, f))
+          throw std::runtime_error("can't read parameter " + key);
         cp->initializeInteger(f);
       } break;
 
       case ControlParameterValueKind::VEC3_DOUBLE: {
         std::vector<double> vv;
-        assert(paramHandler.getVector(key, vv));
-        assert(vv.size() == 3);
+        if (!paramHandler.getVector(key, vv) || vv.size() != 3)
+          throw std::runtime_error("can't read parameter " + key);
         Vec3<double> v(vv[0], vv[1], vv[2]);
         cp->initializeVec3d(v);
       } break;
 
       case ControlParameterValueKind::VEC3_FLOAT: {
         std::vector<float> vv;
-        assert(paramHandler.getVector(key, vv));
-        assert(vv.size() == 3);
+        if (!paramHandler.getVector(key, vv) || vv.size() != 3)
+          throw std::runtime_error("can't read parameter " + key);
         Vec3<float> v(vv[0], vv[1], vv[2]);
         cp->initializeVec3f(v);
       } break;
@@ -445,35 +448,38 @@ void ControlParameters::initializeFromYamlFile(const std::string& path) {
     ControlParameter& cp = collection.lookup(key);
     switch (cp._kind) {
       case ControlParameterValueKind::DOUBLE: {
-        double d;
-        assert(paramHandler.getValue(key, d));
+        double d = 0.;
+        if (!paramHandler.getValue(key, d))
+          throw std::runtime_error("can't read parameter " + key);
         cp.initializeDouble(d);
       } break;
 
       case ControlParameterValueKind::FLOAT: {
-        float f;
-        assert(paramHandler.getValue(key, f));
+        float f = 0.f;
+        if (!paramHandler.getValue(key, f))
+          throw std::runtime_error("can't read parameter " + key);
         cp.initializeFloat(f);
       } break;
 
       case ControlParameterValueKind::S64: {
-        s64 f;
-        assert(paramHandler.getValue(key, f));
+        s64 f = 0;
+        if (!paramHandler.getValue(key, f))
+          throw std::runtime_error("can't read parameter " + key);
         cp.initializeInteger(f);
       } break;
 
       case ControlParameterValueKind::VEC3_DOUBLE: {
         std::vector<double> vv;
-        assert(paramHandler.getVector(key, vv));
-        assert(vv.size() == 3);
+        if (!paramHandler.getVector(key, vv) || vv.size() != 3)
+          throw std::runtime_error("can't read parameter " + key);
         Vec3<double> v(vv[0], vv[1], vv[2]);
         cp.initializeVec3d(v);
       } break;
 
       case ControlParameterValueKind::VEC3_FLOAT: {
         std::vector<float> vv;
-        assert(paramHandler.getVector(key, vv));
-        assert(vv.size() == 3);
+        if (!paramHandler.getVector(key, vv) || vv.size() != 3)
+          throw std::runtime_error("can't read parameter " + key);
         Vec3<float> v(vv[0], vv[1], vv[2]);
         cp.initializeVec3f(v);
       } break;

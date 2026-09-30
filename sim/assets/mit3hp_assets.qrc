@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/mit3hp">
+    <file alias="logo.png">logo_3hp.png</file>
+  </qresource>
+</RCC>

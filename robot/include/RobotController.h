@@ -31,6 +31,7 @@ public:
   virtual void updateVisualization() = 0;
   virtual ControlParameters* getUserControlParameters() = 0;
   virtual void Estop() {}
+  virtual int getControllerMode() const { return -1; }
 
 protected:
   Quadruped<float>* _quadruped = nullptr;

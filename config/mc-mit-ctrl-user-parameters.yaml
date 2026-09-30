@@ -29,7 +29,8 @@ Kd_foot           : [10, 10, 10]
 Kp_ori            : [100, 100, 100]
 Kd_ori            : [10, 10, 10]
 
-cmpc_gait         : 9
+# MIT_3HP khoi dong voi Trotting. GUI co the chon gait khac truoc Locomotion.
+cmpc_gait         : 0
 cmpc_x_drag       : 3
 cmpc_use_sparse   : 0
 cmpc_bonus_swing  : 0

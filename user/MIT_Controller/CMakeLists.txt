@@ -1,3 +1,5 @@
+# Generated MIT_3HP LCM headers must win over stale local generated copies.
+include_directories(BEFORE ${CMAKE_BINARY_DIR})
 include_directories("./")
 include_directories("./Controllers")
 include_directories("../../robot/include")
@@ -10,7 +12,6 @@ include_directories("../../third-party/ParamHandler")
 include_directories("../../lcm-types/cpp")
 include_directories("/usr/include/lcm/")   # lcm includes
 include_directories("/usr/include/eigen3")   # Eigen includes
-include_directories(${CMAKE_BINARY_DIR})
 include_directories(${PROJECT_SOURCE_DIR})
 
 file(GLOB_RECURSE sources
@@ -24,6 +25,7 @@ add_subdirectory(Controllers/WBC_Ctrl)
 add_subdirectory(Controllers/VisionMPC)
 
 add_executable(mit_ctrl ${sources} MIT_Controller.cpp main.cpp)
+add_dependencies(mit_ctrl generate_mit3hp_lcm)
 target_link_libraries(mit_ctrl robot biomimetics)
 target_link_libraries(mit_ctrl dynacore_param_handler qpOASES)
 target_link_libraries(mit_ctrl Goldfarb_Optimizer osqp)

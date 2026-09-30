@@ -20,6 +20,7 @@ public:
     return &userParameters;
   }
   virtual void Estop(){ _controlFSM->initialize(); }
+  int getControllerMode() const override;
 
 
 protected:

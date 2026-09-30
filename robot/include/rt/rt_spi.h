@@ -46,6 +46,23 @@ void init_spi();
 void spi_send_receive(spi_command_t* command, spi_data_t* data);
 void spi_driver_run();
 
+typedef struct {
+  uint64_t transmitted_frames;
+  uint32_t last_tx_flags;
+  uint64_t successful_transfers;
+  uint64_t ioctl_errors;
+  uint64_t incomplete_transfers;
+  uint64_t checksum_errors;  // Total rejected feedback, retained for 5 s rate.
+  uint64_t all_zero_responses;
+  uint64_t checksum_mismatches;
+  uint64_t implausible_feedback;
+  uint64_t last_success_us;
+} spi_board_health_t;
+
+// Lay snapshot bo dem cua tung board. board_index: 0=/dev/spidev1.0,
+// 1=/dev/spidev1.1. Ham nay khong reset bo dem.
+void get_spi_board_health(int board_index, spi_board_health_t* health);
+
 spi_data_t* get_spi_data();
 spi_command_t* get_spi_command();
 

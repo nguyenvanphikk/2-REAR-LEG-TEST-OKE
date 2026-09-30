@@ -15,6 +15,7 @@
 #define TASK_PRIORITY 49      // linux priority, this is not the nice value
 
 #include <string>
+#include <atomic>
 #include <mutex>
 #include <lcm-cpp.hpp>
 #include <lord_imu/LordImu.h>
@@ -62,6 +63,9 @@ class HardwareBridge {
   PeriodicTaskManager taskManager;
   PrintTaskStatus statusTask;
   GamepadCommand _gamepadCommand;
+  // Moc thoi gian lenh GUI gan nhat. RobotRunner dung moc nay lam watchdog;
+  // neu GUI mat ket noi thi FSM tu ve PASSIVE va flags dong co ve 0.
+  std::atomic<uint64_t> _lastGuiCommandUs{0};
   VisualizationData _visualizationData;
   CheetahVisualization _mainCheetahVisualization;
   lcm::LCM _interfaceLCM;
@@ -73,6 +77,8 @@ class HardwareBridge {
   SpiCommand _spiCommand{};
   // Mutex nay chi bao ve luc sao chep snapshot; khong duoc giu khi ioctl().
   std::mutex _spiDataMutex;
+  std::mutex _spiHealthMutex;
+  spi_board_health_t _spiHealth[2]{};
 
   TiBoardCommand _tiBoardCommand[4];
   TiBoardData _tiBoardData[4];

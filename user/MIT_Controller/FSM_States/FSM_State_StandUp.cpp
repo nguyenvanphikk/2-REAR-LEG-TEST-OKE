@@ -1,7 +1,6 @@
 /*============================= Stand Up ==============================*/
 /**
- * Transitionary state that is called for the robot to stand up into
- * balance control mode.
+ * MIT_3HP temporary, low-gain joint-position test near the encoder zero.
  */
 
 #include "FSM_State_StandUp.h"
@@ -33,12 +32,6 @@ void FSM_State_StandUp<T>::onEnter() {
   // Reset the transition data
   this->transitionData.zero();
 
-  // Reset iteration counter
-  iter = 0;
-
-  for(size_t leg(0); leg<4; ++leg){
-    _ini_foot_pos[leg] = this->_data->_legController->datas[leg].p;
-  }
 }
 
 /**
@@ -46,21 +39,26 @@ void FSM_State_StandUp<T>::onEnter() {
  */
 template <typename T>
 void FSM_State_StandUp<T>::run() {
-
-  if(this->_data->_quadruped->_robotType == RobotType::MINI_CHEETAH) {
-    T hMax = 0.25;
-    T progress = 2 * iter * this->_data->controlParameters->controller_dt;
-
-    if (progress > 1.){ progress = 1.; }
-
-    for(int i = 0; i < 4; i++) {
-      this->_data->_legController->commands[i].kpCartesian = Vec3<T>(500, 500, 500).asDiagonal();
-      this->_data->_legController->commands[i].kdCartesian = Vec3<T>(8, 8, 8).asDiagonal();
-
-      this->_data->_legController->commands[i].pDes = _ini_foot_pos[i];
-      this->_data->_legController->commands[i].pDes[2] = 
-        progress*(-hMax) + (1. - progress) * _ini_foot_pos[i][2];
+  // Thu goc nho hon, xa gioi han am -0.10 rad cua knee phai tren STM32:
+  // q_knee=0.02 rad => goc motor +/-0.03 rad qua dai 1.5:1.
+  // Day chi la phep thu khop, khong phai tu the dung chiu tai.
+  constexpr T kKneeTest = T(0.02);
+  this->_data->_legController->setEnabled(true);
+  for (int leg = 0; leg < 4; ++leg) {
+    auto& command = this->_data->_legController->commands[leg];
+    command.qDes.setZero();
+    command.qDes[2] = kKneeTest;
+    command.qdDes.setZero();
+    command.kpJoint.setZero();
+    command.kdJoint.setZero();
+    if (leg < 2) {
+      command.kpJoint.diagonal().setConstant(T(5));
+      command.kdJoint.diagonal().setConstant(T(0.2));
     }
+    command.kpCartesian.setZero();
+    command.kdCartesian.setZero();
+    command.tauFeedForward.setZero();
+    command.forceFeedForward.setZero();
   }
 }
 
@@ -73,22 +71,18 @@ void FSM_State_StandUp<T>::run() {
 template <typename T>
 FSM_StateName FSM_State_StandUp<T>::checkTransition() {
   this->nextStateName = this->stateName;
-  iter++;
+
+  // Giu goc dich den khi nguoi dung chon PASSIVE/E-STOP.
 
   // Switch FSM control mode
   switch ((int)this->_data->controlParameters->control_mode) {
     case K_STAND_UP:
       break;
     case K_BALANCE_STAND:
-      this->nextStateName = FSM_StateName::BALANCE_STAND;
-      break;
-
     case K_LOCOMOTION:
-      this->nextStateName = FSM_StateName::LOCOMOTION;
-      break;
-
     case K_VISION:
-      this->nextStateName = FSM_StateName::VISION;
+      // Chế độ kiểm tra zero không cho chuyển tới điều khiển chuyển động.
+      this->_data->controlParameters->control_mode = K_STAND_UP;
       break;
 
 
@@ -119,19 +113,6 @@ TransitionData<T> FSM_State_StandUp<T>::transition() {
     case FSM_StateName::PASSIVE:  // normal
       this->transitionData.done = true;
       break;
-
-    case FSM_StateName::BALANCE_STAND:
-      this->transitionData.done = true;
-      break;
-
-    case FSM_StateName::LOCOMOTION:
-      this->transitionData.done = true;
-      break;
-
-    case FSM_StateName::VISION:
-      this->transitionData.done = true;
-      break;
-
 
     default:
       std::cout << "[CONTROL FSM] Something went wrong in transition"

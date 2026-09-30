@@ -54,6 +54,22 @@ set(CMAKE_CXX_STANDARD 14)
 
 #find_package(lcm)
 
+# Tao message trang thai rieng cua MIT_3HP. Generated header nam cung cac LCM
+# type cu va duoc tao lai tu file .lcm khi build tren Jetson moi.
+find_program(LCM_GEN_EXECUTABLE lcm-gen)
+if(NOT LCM_GEN_EXECUTABLE)
+  message(FATAL_ERROR "lcm-gen is required to build MIT_3HP status telemetry")
+endif()
+set(MIT3HP_STATUS_HPP ${CMAKE_BINARY_DIR}/mit3hp_status_lcmt.hpp)
+add_custom_command(
+  OUTPUT ${MIT3HP_STATUS_HPP}
+  COMMAND ${LCM_GEN_EXECUTABLE} -x --cpp-std c++11
+          --cpp-hpath ${CMAKE_BINARY_DIR}
+          ${PROJECT_SOURCE_DIR}/lcm-types/mit3hp_status_lcmt.lcm
+  DEPENDS ${PROJECT_SOURCE_DIR}/lcm-types/mit3hp_status_lcmt.lcm
+  COMMENT "Generating MIT_3HP LCM status type")
+add_custom_target(generate_mit3hp_lcm DEPENDS ${MIT3HP_STATUS_HPP})
+
 add_subdirectory(robot)
 add_subdirectory(third-party)
 add_subdirectory(common)

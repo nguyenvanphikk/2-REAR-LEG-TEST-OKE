@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <thread>
+#include <chrono>
 #include "Configuration.h"
 
 #include "HardwareBridge.h"
@@ -110,6 +111,10 @@ void HardwareBridge::handleGamepadLCM(const lcm::ReceiveBuffer* rbuf,
   (void)rbuf;
   (void)chan;
   _gamepadCommand.set(msg);
+  _lastGuiCommandUs.store(
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count(),
+      std::memory_order_relaxed);
 }
 
 /*!
@@ -297,6 +302,9 @@ void MiniCheetahHardwareBridge::run() {
   _robotRunner->spiData = &_spiData;
   _robotRunner->spiCommand = &_spiCommand;
   _robotRunner->spiDataMutex = &_spiDataMutex;
+  _robotRunner->spiHealthMutex = &_spiHealthMutex;
+  _robotRunner->spiHealth = _spiHealth;
+  _robotRunner->lastGuiCommandUs = &_lastGuiCommandUs;
   _robotRunner->robotType = RobotType::MINI_CHEETAH;
   _robotRunner->vectorNavData = &_vectorNavData;
   _robotRunner->controlParameters = &_robotParams;
@@ -429,6 +437,15 @@ void MiniCheetahHardwareBridge::runSpi() {
   // spi_driver_run() truyen board 0 roi board 1 trong cung mot SPI task.
   // Tuyet doi khong giu _spiDataMutex khi ioctl() dang cho phan cung.
   spi_driver_run();
+
+  spi_board_health_t latestHealth[2];
+  get_spi_board_health(0, &latestHealth[0]);
+  get_spi_board_health(1, &latestHealth[1]);
+  {
+    std::lock_guard<std::mutex> lock(_spiHealthMutex);
+    _spiHealth[0] = latestHealth[0];
+    _spiHealth[1] = latestHealth[1];
+  }
 
   // Chi cong bo response sau khi ca transaction da hoan tat. Controller se
   // khong the doc mot goi gom mot phan du lieu cu va mot phan du lieu moi.

@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <chrono>
 
 #include <linux/spi/spidev.h>
 #include "rt/rt_spi.h"
@@ -18,7 +19,8 @@
 
 unsigned char spi_mode = SPI_MODE_0;
 unsigned char spi_bits_per_word = 8;
-unsigned int spi_speed = 6000000;  // 6 MHz
+// Toc do Jetson SPI de thu nghiem voi hai board STM32.
+unsigned int spi_speed = 1000000;  // 1 MHz
 uint8_t lsb = 0x01;
 
 int spi_1_fd = -1;
@@ -34,6 +36,25 @@ spi_data_t spi_data_drv;
 spi_torque_t spi_torque;
 
 pthread_mutex_t spi_mutex;
+static spi_board_health_t spi_board_health[2]{};
+// Du lieu goc/toc do chi duoc cap nhat khi goi 132 byte qua kiem tra XOR va
+// mien gia tri. Goi loi giu nguyen mau hop le gan nhat cua board do.
+
+static uint64_t monotonic_time_us() {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// Khong in mot dong cho moi goi loi trong SPI task: khi loi nhieu, terminal
+// co the lam tre ca hai board. Bo dem loi tren GUI van ghi day du moi goi.
+static bool should_log_spi_error(int board) {
+  static uint64_t last_log_us[2] = {};
+  const uint64_t now_us = monotonic_time_us();
+  if (last_log_us[board] && now_us - last_log_us[board] < 1000000)
+    return false;
+  last_log_us[board] = now_us;
+  return true;
+}
 
 const float max_torque[3] = {17.f, 17.f, 26.f};  // TODO CHECK WITH BEN
 const float wimp_torque[3] = {6.f, 6.f, 6.f};    // TODO CHECK WITH BEN
@@ -127,6 +148,7 @@ void init_spi() {
 
   memset(&spi_command_drv, 0, sizeof(spi_command_drv));
   memset(&spi_data_drv, 0, sizeof(spi_data_drv));
+  memset(spi_board_health, 0, sizeof(spi_board_health));
 
   if (pthread_mutex_init(&spi_mutex, NULL) != 0)
     printf("[ERROR: RT SPI] Failed to create spi data mutex\n");
@@ -178,11 +200,19 @@ int spi_open() {
   rv = ioctl(spi_2_fd, SPI_IOC_WR_BITS_PER_WORD, &spi_bits_per_word);
   if (rv < 0) perror("[ERROR] ioctl spi_ioc_wr_bits_per_word (2)");
 
-  rv = ioctl(spi_1_fd, SPI_IOC_RD_BITS_PER_WORD, &spi_bits_per_word);
-  if (rv < 0) perror("[ERROR] ioctl spi_ioc_rd_bits_per_word (1)");
-
-  rv = ioctl(spi_2_fd, SPI_IOC_RD_BITS_PER_WORD, &spi_bits_per_word);
-  if (rv < 0) perror("[ERROR] ioctl spi_ioc_rd_bits_per_word (2)");
+  // Read back into a separate variable so a rejected device setting cannot
+  // silently change the requested 16-bit width for both transfers.
+  for (int board = 0; board < 2; ++board) {
+    uint8_t actual_bits_per_word = 0;
+    rv = ioctl(board == 0 ? spi_1_fd : spi_2_fd,
+               SPI_IOC_RD_BITS_PER_WORD, &actual_bits_per_word);
+    if (rv < 0) {
+      perror("[ERROR] ioctl spi_ioc_rd_bits_per_word");
+    } else if (actual_bits_per_word != spi_bits_per_word) {
+      printf("[ERROR: RT SPI] /dev/spidev1.%d configured for %u bits/word, "
+             "expected %u\n", board, actual_bits_per_word, spi_bits_per_word);
+    }
+  }
 
   rv = ioctl(spi_1_fd, SPI_IOC_WR_MAX_SPEED_HZ, &spi_speed);
   if (rv < 0) perror("[ERROR] ioctl spi_ioc_wr_max_speed_hz (1)");
@@ -204,50 +234,51 @@ int spi_open() {
 
 int spi_driver_iterations = 0;
 
+// Day thuc te: kenh 0 moi STM32 la chan trai, kenh 1 la chan phai.
+// Thu tu model cua MIT van la FR, FL, HR, HL. Dao kenh o ca hai chieu SPI.
+static int model_leg_for_spine_channel(int first_leg, int channel) {
+  return first_leg + (1 - channel);
+}
+
 /*!
  * convert spi command to spine_cmd_t
  */
 void spi_to_spine(spi_command_t *cmd, spine_cmd_t *spine_cmd, int leg_0) {
   for (int i = 0; i < 2; i++) {
-    // spine_cmd->q_des_abad[i] = (cmd->q_des_abad[i+leg_0] +
-    // abad_offset[i+leg_0]) * abad_side_sign[i+leg_0]; spine_cmd->q_des_hip[i]
-    // = (cmd->q_des_hip[i+leg_0] + hip_offset[i+leg_0]) *
-    // hip_side_sign[i+leg_0]; spine_cmd->q_des_knee[i] =
-    // (cmd->q_des_knee[i+leg_0] + knee_offset[i+leg_0]) /
-    // knee_side_sign[i+leg_0];
+    const int leg = model_leg_for_spine_channel(leg_0, i);
     spine_cmd->q_des_abad[i] =
-        (cmd->q_des_abad[i + leg_0] * abad_side_sign[i + leg_0]) +
-        abad_offset[i + leg_0];
+        (cmd->q_des_abad[leg] * abad_side_sign[leg]) +
+        abad_offset[leg];
     spine_cmd->q_des_hip[i] =
-        (cmd->q_des_hip[i + leg_0] * hip_side_sign[i + leg_0]) +
-        hip_offset[i + leg_0];
+        (cmd->q_des_hip[leg] * hip_side_sign[leg]) +
+        hip_offset[leg];
     spine_cmd->q_des_knee[i] =
-        (cmd->q_des_knee[i + leg_0] / knee_side_sign[i + leg_0]) +
-        knee_offset[i + leg_0];
+        (cmd->q_des_knee[leg] / knee_side_sign[leg]) +
+        knee_offset[leg];
 
     spine_cmd->qd_des_abad[i] =
-        cmd->qd_des_abad[i + leg_0] * abad_side_sign[i + leg_0];
+        cmd->qd_des_abad[leg] * abad_side_sign[leg];
     spine_cmd->qd_des_hip[i] =
-        cmd->qd_des_hip[i + leg_0] * hip_side_sign[i + leg_0];
+        cmd->qd_des_hip[leg] * hip_side_sign[leg];
     spine_cmd->qd_des_knee[i] =
-        cmd->qd_des_knee[i + leg_0] / knee_side_sign[i + leg_0];
+        cmd->qd_des_knee[leg] / knee_side_sign[leg];
 
-    spine_cmd->kp_abad[i] = cmd->kp_abad[i + leg_0];
-    spine_cmd->kp_hip[i] = cmd->kp_hip[i + leg_0];
-    spine_cmd->kp_knee[i] = cmd->kp_knee[i + leg_0];
+    spine_cmd->kp_abad[i] = cmd->kp_abad[leg];
+    spine_cmd->kp_hip[i] = cmd->kp_hip[leg];
+    spine_cmd->kp_knee[i] = cmd->kp_knee[leg];
 
-    spine_cmd->kd_abad[i] = cmd->kd_abad[i + leg_0];
-    spine_cmd->kd_hip[i] = cmd->kd_hip[i + leg_0];
-    spine_cmd->kd_knee[i] = cmd->kd_knee[i + leg_0];
+    spine_cmd->kd_abad[i] = cmd->kd_abad[leg];
+    spine_cmd->kd_hip[i] = cmd->kd_hip[leg];
+    spine_cmd->kd_knee[i] = cmd->kd_knee[leg];
 
     spine_cmd->tau_abad_ff[i] =
-        cmd->tau_abad_ff[i + leg_0] * abad_side_sign[i + leg_0];
+        cmd->tau_abad_ff[leg] * abad_side_sign[leg];
     spine_cmd->tau_hip_ff[i] =
-        cmd->tau_hip_ff[i + leg_0] * hip_side_sign[i + leg_0];
+        cmd->tau_hip_ff[leg] * hip_side_sign[leg];
     spine_cmd->tau_knee_ff[i] =
-        cmd->tau_knee_ff[i + leg_0] * knee_side_sign[i + leg_0];
+        cmd->tau_knee_ff[leg] * knee_side_sign[leg];
 
-    spine_cmd->flags[i] = cmd->flags[i + leg_0];
+    spine_cmd->flags[i] = cmd->flags[leg];
   }
   spine_cmd->checksum = xor_checksum((uint32_t *)spine_cmd, 32);
 }
@@ -255,33 +286,67 @@ void spi_to_spine(spi_command_t *cmd, spine_cmd_t *spine_cmd, int leg_0) {
 /*!
  * convert spine_data_t to spi data
  */
-void spine_to_spi(spi_data_t *data, spine_data_t *spine_data, int leg_0) {
+int spine_to_spi(spi_data_t *data, spine_data_t *spine_data, int leg_0) {
+  // XOR cua goi toan 0 van hop le; khong duoc coi la board co nguon khi
+  // chuong trinh da cho phep phep thu motor co luc.
+  const uint32_t *response_words =
+      reinterpret_cast<const uint32_t *>(spine_data);
+  bool all_zero = true;
+  for (size_t i = 0; i < sizeof(spine_data_t) / sizeof(uint32_t); ++i) {
+    if (response_words[i] != 0) {
+      all_zero = false;
+      break;
+    }
+  }
+  if (all_zero) {
+    static uint32_t empty_count[2] = {};
+    const int board = leg_0 / 2;
+    if ((empty_count[board]++ % 500) == 0)
+      printf("[ERROR: RT SPI] /dev/spidev1.%d all-zero response; "
+             "STM32 presence not verified\n", board);
+    return -1;
+  }
+
   const uint32_t calculated = xor_checksum((uint32_t *)spine_data, 14);
   const uint32_t received = (uint32_t)spine_data->checksum;
-  if (calculated != received) {
-    printf("[ERROR: RT SPI] /dev/spidev1.%d response checksum mismatch: "
-           "received=0x%08" PRIx32 " calculated=0x%08" PRIx32
-           "; response discarded\n", leg_0 / 2, received, calculated);
-    return;
+  const bool checksum_ok = calculated == received;
+  if (!checksum_ok) {
+    if (should_log_spi_error(leg_0 / 2))
+      printf("[ERROR: RT SPI] /dev/spidev1.%d response checksum mismatch: "
+             "received=0x%08" PRIx32 " calculated=0x%08" PRIx32
+             "; response discarded\n", leg_0 / 2, received, calculated);
+    return -2;
+  }
+
+  // Du lieu CAN cua motor duoc giai ma trong mien p +/-12.5 rad,
+  // v +/-65 rad/s. Chan gia tri phi huu han/ngoai mien du XOR trung.
+  const float *feedback = reinterpret_cast<const float *>(spine_data);
+  for (int i = 0; i < 12; ++i) {
+    const float limit = i < 6 ? 12.5f : 65.f;
+    if (!isfinite(feedback[i]) || fabsf(feedback[i]) > limit) {
+      if (should_log_spi_error(leg_0 / 2))
+        printf("[ERROR: RT SPI] /dev/spidev1.%d implausible motor feedback; "
+               "response discarded\n", leg_0 / 2);
+      return -3;
+    }
   }
 
   for (int i = 0; i < 2; i++) {
-    data->q_abad[i + leg_0] = (spine_data->q_abad[i] - abad_offset[i + leg_0]) *
-                              abad_side_sign[i + leg_0];
-    data->q_hip[i + leg_0] = (spine_data->q_hip[i] - hip_offset[i + leg_0]) *
-                             hip_side_sign[i + leg_0];
-    data->q_knee[i + leg_0] = (spine_data->q_knee[i] - knee_offset[i + leg_0]) *
-                              knee_side_sign[i + leg_0];
+    const int leg = model_leg_for_spine_channel(leg_0, i);
+    data->q_abad[leg] = (spine_data->q_abad[i] - abad_offset[leg]) *
+                         abad_side_sign[leg];
+    data->q_hip[leg] = (spine_data->q_hip[i] - hip_offset[leg]) *
+                        hip_side_sign[leg];
+    data->q_knee[leg] = (spine_data->q_knee[i] - knee_offset[leg]) *
+                         knee_side_sign[leg];
 
-    data->qd_abad[i + leg_0] =
-        spine_data->qd_abad[i] * abad_side_sign[i + leg_0];
-    data->qd_hip[i + leg_0] = spine_data->qd_hip[i] * hip_side_sign[i + leg_0];
-    data->qd_knee[i + leg_0] =
-        spine_data->qd_knee[i] * knee_side_sign[i + leg_0];
+    data->qd_abad[leg] = spine_data->qd_abad[i] * abad_side_sign[leg];
+    data->qd_hip[leg] = spine_data->qd_hip[i] * hip_side_sign[leg];
+    data->qd_knee[leg] = spine_data->qd_knee[i] * knee_side_sign[leg];
 
-    data->flags[i + leg_0] = spine_data->flags[i];
+    data->flags[leg] = spine_data->flags[i];
   }
-
+  return 1;
 }
 
 /*!
@@ -307,10 +372,10 @@ void spi_send_receive(spi_command_t *command, spi_data_t *data) {
     // zero rx buffer
     memset(rx_buf, 0, K_WORDS_PER_MESSAGE * sizeof(uint16_t));
 
-    // copy into tx buffer flipping bytes
-    for (int i = 0; i < K_WORDS_PER_MESSAGE; i++)
-      tx_buf[i] = (cmd_d[i] >> 8) + ((cmd_d[i] & 0xff) << 8);
-    // tx_buf[i] = __bswap_16(cmd_d[i]);
+    // Linux sends each 8-bit word in memory order. Swap the bytes in each
+    // native-endian uint16_t so the STM32 receives the same 16-bit values.
+    for (int i = 0; i < K_WORDS_PER_MESSAGE; ++i)
+      tx_buf[i] = (cmd_d[i] >> 8) | (cmd_d[i] << 8);
 
     // each word is two bytes long
     constexpr size_t transfer_bytes = K_WORDS_PER_MESSAGE * sizeof(uint16_t);
@@ -336,26 +401,64 @@ void spi_send_receive(spi_command_t *command, spi_data_t *data) {
     int rv = ioctl(spi_board == 0 ? spi_1_fd : spi_2_fd, SPI_IOC_MESSAGE(1),
                    &spi_message);
     if (rv < 0) {
+      spi_board_health[spi_board].ioctl_errors++;
       const int saved_errno = errno;
-      printf("[ERROR: RT SPI] /dev/spidev1.%d ioctl failed: %s (errno=%d); "
-             "expected %zu bytes; response discarded\n",
-             spi_board, strerror(saved_errno), saved_errno, transfer_bytes);
+      if (should_log_spi_error(spi_board))
+        printf("[ERROR: RT SPI] /dev/spidev1.%d ioctl failed: %s (errno=%d); "
+               "expected %zu bytes; response discarded\n",
+               spi_board, strerror(saved_errno), saved_errno, transfer_bytes);
       continue;
     }
     if (rv != static_cast<int>(transfer_bytes)) {
-      printf("[ERROR: RT SPI] /dev/spidev1.%d incomplete transfer: "
-             "got %d bytes, expected %zu; response discarded\n",
-             spi_board, rv, transfer_bytes);
+      spi_board_health[spi_board].incomplete_transfers++;
+      if (should_log_spi_error(spi_board))
+        printf("[ERROR: RT SPI] /dev/spidev1.%d incomplete transfer: "
+               "got %d bytes, expected %zu; response discarded\n",
+               spi_board, rv, transfer_bytes);
       continue;
     }
+    // ioctl hoan tat 132 byte: ghi lai co enable THUC SU da dua vao
+    // transaction Jetson. Day chua chung minh STM32 da chap nhan checksum.
+    spi_board_health[spi_board].transmitted_frames++;
+    spi_board_health[spi_board].last_tx_flags =
+        (static_cast<uint32_t>(g_spine_cmd.flags[0]) & 0xffu) |
+        ((static_cast<uint32_t>(g_spine_cmd.flags[1]) & 0xffu) << 8);
 
-    // flip bytes the other way
-    for (int i = 0; i < 30; i++)
-      data_d[i] = (rx_buf[i] >> 8) + ((rx_buf[i] & 0xff) << 8);
-    // data_d[i] = __bswap_16(rx_buf[i]);
+    // Convert the 60 received bytes back into native-endian 16-bit values.
+    for (int i = 0; i < 30; ++i)
+      data_d[i] = (rx_buf[i] >> 8) | (rx_buf[i] << 8);
 
     // copy back to data
-    spine_to_spi(data, &g_spine_data, spi_board * 2);
+    const int response_status = spine_to_spi(data, &g_spine_data, spi_board * 2);
+    if (response_status > 0) {
+      spi_board_health[spi_board].successful_transfers++;
+      spi_board_health[spi_board].last_success_us = monotonic_time_us();
+      // Chan doan board 1.1: so sanh goc trong response STM32 voi goc da
+      // quy doi cho HR/HL. Chi in 1 lan/giay de khong nghen SPI task.
+      if (spi_board == 1) {
+        static uint64_t last_rear_log_us = 0;
+        const uint64_t now_us = spi_board_health[spi_board].last_success_us;
+        if (now_us - last_rear_log_us >= 1000000) {
+          last_rear_log_us = now_us;
+          printf("[SPI 1.1 RX VALID] STM32 ch0 a/h/k=%+.3f/%+.3f/%+.3f "
+                 "ch1=%+.3f/%+.3f/%+.3f | Jetson HL=%+.3f/%+.3f/%+.3f "
+                 "HR=%+.3f/%+.3f/%+.3f\n",
+                 g_spine_data.q_abad[0], g_spine_data.q_hip[0],
+                 g_spine_data.q_knee[0], g_spine_data.q_abad[1],
+                 g_spine_data.q_hip[1], g_spine_data.q_knee[1],
+                 data->q_abad[3], data->q_hip[3], data->q_knee[3],
+                 data->q_abad[2], data->q_hip[2], data->q_knee[2]);
+        }
+      }
+    } else if (response_status < 0) {
+      spi_board_health[spi_board].checksum_errors++;
+      if (response_status == -1)
+        spi_board_health[spi_board].all_zero_responses++;
+      else if (response_status == -2)
+        spi_board_health[spi_board].checksum_mismatches++;
+      else if (response_status == -3)
+        spi_board_health[spi_board].implausible_feedback++;
+    }
   }
 }
 
@@ -385,5 +488,12 @@ spi_command_t *get_spi_command() {
  * Get the spi data
  */
 spi_data_t *get_spi_data() { return &spi_data_drv; }
+
+void get_spi_board_health(int board_index, spi_board_health_t* health) {
+  if (!health || board_index < 0 || board_index > 1) return;
+  pthread_mutex_lock(&spi_mutex);
+  *health = spi_board_health[board_index];
+  pthread_mutex_unlock(&spi_mutex);
+}
 
 #endif

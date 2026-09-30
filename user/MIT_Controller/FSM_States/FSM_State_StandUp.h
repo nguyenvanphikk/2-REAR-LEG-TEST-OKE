@@ -29,8 +29,6 @@ class FSM_State_StandUp : public FSM_State<T> {
   TransitionData<T> testTransition();
 
  private:
-  // Keep track of the control iterations
-  int iter = 0;
   std::vector< Vec3<T> > _ini_foot_pos;
 };
 
