@@ -246,16 +246,6 @@ void RobotRunner::finalizeStep() {
   if (robotType == RobotType::MINI_CHEETAH) {
     const auto writeSpiCommand = [&]() {
       _legController->updateCommand(spiCommand);
-      // Phep thu STAND_UP tam thoi chi bat hai chan truoc (FR=0, FL=1).
-      // HR/HL van duoc doc feedback nhung khong vao mode co luc.
-      if (_robot_ctrl->getControllerMode() == 1) {
-        for (int leg = 2; leg < 4; ++leg) {
-          spiCommand->flags[leg] = 0;
-          spiCommand->kp_abad[leg] = spiCommand->kp_hip[leg] = spiCommand->kp_knee[leg] = 0;
-          spiCommand->kd_abad[leg] = spiCommand->kd_hip[leg] = spiCommand->kd_knee[leg] = 0;
-          spiCommand->tau_abad_ff[leg] = spiCommand->tau_hip_ff[leg] = spiCommand->tau_knee_ff[leg] = 0;
-        }
-      }
     };
     // Tao tron goi command trong mot lan khoa ngan. SPI task chi lay snapshot
     // sau khi updateCommand() da ghi xong ca 12 khop.

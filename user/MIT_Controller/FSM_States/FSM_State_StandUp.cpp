@@ -39,9 +39,8 @@ void FSM_State_StandUp<T>::onEnter() {
  */
 template <typename T>
 void FSM_State_StandUp<T>::run() {
-  // Thu goc nho hon, xa gioi han am -0.10 rad cua knee phai tren STM32:
-  // q_knee=0.02 rad => goc motor +/-0.03 rad qua dai 1.5:1.
-  // Day chi la phep thu khop, khong phai tu the dung chiu tai.
+  // Suspended-robot joint test: use the same small knee target as the
+  // previously tested front-leg command on all four legs.
   constexpr T kKneeTest = T(0.02);
   this->_data->_legController->setEnabled(true);
   for (int leg = 0; leg < 4; ++leg) {
@@ -51,10 +50,8 @@ void FSM_State_StandUp<T>::run() {
     command.qdDes.setZero();
     command.kpJoint.setZero();
     command.kdJoint.setZero();
-    if (leg < 2) {
-      command.kpJoint.diagonal().setConstant(T(5));
-      command.kdJoint.diagonal().setConstant(T(0.2));
-    }
+    command.kpJoint.diagonal().setConstant(T(5));
+    command.kdJoint.diagonal().setConstant(T(0.2));
     command.kpCartesian.setZero();
     command.kdCartesian.setZero();
     command.tauFeedForward.setZero();

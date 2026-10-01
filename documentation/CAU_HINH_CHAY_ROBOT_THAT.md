@@ -77,7 +77,7 @@ Motor: Steadywin GIM8108-6, nguồn danh định 24 V, hỗ trợ MIT control.
 | ⚠️ | Không có watchdog phản hồi SPI trên Jetson | SPI lỗi chỉ hiện cảnh báo, gói lỗi giữ mẫu hợp lệ gần nhất. Người vận hành xác nhận firmware đã nạp không còn tự cắt motor sau 5 gói lỗi; cần kiểm tra đúng phiên bản firmware trên cả hai board |
 | ✅ | PASSIVE thực sự gửi `flags=0` | STM32 được yêu cầu disable motor |
 | ✅ | Bỏ tự chạy `JPosInitializer` | Bật chương trình không tự kéo chân qua pose Mini Cheetah cũ |
-| ⚠️ | Nút STAND_UP tạm là thử hai chân trước khi treo robot | Chỉ FR/FL nhận enable và q_des=[0,0,0.02] rad, Kp=5/Kd=0.2; board sau HR/HL tắt motor. Không còn tự ngắt theo tuổi phản hồi SPI hoặc ngưỡng q/qd. Giữ đến khi PASSIVE/E-STOP, mất GUI/IMU hoặc bảo vệ STM32; không phải tư thế đứng; Balance/Locomotion bị khóa |
+| ⚠️ | Nút STAND_UP tạm là thử khớp bốn chân khi treo robot | Cả FR/FL/HR/HL nhận enable và q_des=[0,0,0.02] rad, Kp=5/Kd=0.2; không có đoạn tăng góc trung gian. Không còn tự ngắt theo tuổi phản hồi SPI hoặc ngưỡng q/qd. Giữ đến khi PASSIVE/E-STOP, mất GUI/IMU hoặc bảo vệ STM32; không phải tư thế đứng; Balance/Locomotion bị khóa |
 | ✅ | Offset Jetson của 12 khớp bằng 0 | Phù hợp phương án set-zero motor tại pose chân duỗi thẳng |
 | ✅ | Tỷ số truyền model 6/6/9 | Phản ánh hộp số motor và đai knee 1.5:1 |
 | ✅ | Knee scale có độ lớn `1/1.5` | Quy đổi feedback đầu ra motor sang góc khớp knee |
@@ -236,7 +236,7 @@ lần bật máy sau chỉ cần chạy hai lệnh trên, không cần build l�
 4. Chạy controller; robot phải ở PASSIVE, motor mềm, không tự chạy pose.
 5. Test từng motor với giới hạn thấp; ghi mapping, dấu và zero đủ 12 khớp.
 6. Kiểm tra watchdog GUI và E-stop vật lý; Jetson hiện không có watchdog mất SPI.
-7. Chỉ thử nút khớp FR/FL 0/0/0.02 khi robot được treo, 6 khớp trước gần zero và hai board SPI có phản hồi ổn định. Phần mềm không còn tự kiểm tra các điều kiện q/qd và tuổi SPI này trước/trong khi thử; người vận hành phải kiểm tra chúng. HR/HL vẫn tắt motor; bấm PASSIVE/E-STOP để tắt lực.
+7. Chỉ thử nút khớp bốn chân 0/0/0.02 khi robot được treo, đủ 12 khớp đã kiểm tra zero/chiều và hai board SPI có phản hồi ổn định. Phần mềm không còn tự kiểm tra các điều kiện q/qd và tuổi SPI này trước/trong khi thử; người vận hành phải kiểm tra chúng. Cả bốn chân đều có lực; bấm PASSIVE/E-STOP để tắt lực.
 8. Hoàn thiện đủ 12 phản hồi motor, mapping, chiều, zero và SPI trước khi khôi phục chuyển động.
 
 ## 10. Hành vi an toàn cần nhớ
@@ -245,7 +245,7 @@ lần bật máy sau chỉ cần chạy hai lệnh trên, không cần build l�
   hạ xuống hoặc ngã vì trọng lực.
 - E-stop GUI là E-stop phần mềm, không thay thế nút ngắt nguồn/enable vật lý.
 - Mất GUI quá 300 ms sẽ yêu cầu về PASSIVE. Jetson không còn tự chuyển PASSIVE
-  theo tuổi phản hồi SPI hoặc q/qd trong phép thử FR/FL.
+  theo tuổi phản hồi SPI hoặc q/qd trong phép thử bốn chân.
 - Firmware đang nạp có thể khác file nguồn trên ổ đĩa. Người vận hành xác nhận
   bản đã nạp đã bỏ tự cắt lực sau 5 gói SPI lỗi; không dựa vào bảo vệ này.
   Khi đường truyền lỗi, dùng E-stop hoặc ngắt lực vật lý.
@@ -254,7 +254,7 @@ lần bật máy sau chỉ cần chạy hai lệnh trên, không cần build l�
 
 ## 11. Quản lý mã nguồn
 
-- Nhánh thử hai chân trước trong repository MIT_3HP: `thu-2-chan-truoc`.
+- Tên nhánh Git đang dùng là `thu-2-chan-truoc`; phép thử hiện tại đã đổi thành phép thử khớp bốn chân 0/0/0.02.
 - Mã STM32 SPINDE nằm ngoài repository này; kiểm tra phiên bản đã nạp cho
   từng board trước khi thử motor.
 - Không đưa các thư mục `build-sim/`, `jetson-build/`,

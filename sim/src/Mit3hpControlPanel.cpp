@@ -186,7 +186,7 @@ void Mit3hpControlPanel::buildUi() {
   controlLayout->addWidget(emergency);
 
   auto* modes = new QHBoxLayout;
-  _standButton = new QPushButton("1. FRONT-LEG JOINT TEST");
+  _standButton = new QPushButton("1. FOUR-LEG JOINT TEST");
   _balanceButton = new QPushButton("2. BALANCE");
   _walkButton = new QPushButton("3. LOCOMOTION");
   for (auto* b : {_standButton, _balanceButton, _walkButton}) {
@@ -201,8 +201,9 @@ void Mit3hpControlPanel::buildUi() {
           &Mit3hpControlPanel::requestLocomotion);
   controlLayout->addLayout(modes);
   auto* startupNote = new QLabel(
-      "FR/FL joint test only: hold abad=0, hip=0, knee=0.02 rad (1.1 deg), "
-      "Kp=5, Kd=0.2. HR/HL motors remain off. Suspend the robot before testing. "
+      "FOUR-LEG JOINT TEST: All four legs target abad=0, hip=0, "
+      "knee=0.02 rad with Kp=5 and Kd=0.2. Suspend the robot before testing. "
+      "This is not a load-bearing standing pose. "
       "Press E-STOP/PASSIVE to stop. SPI warnings do not end this test. "
       "Balance and locomotion are locked.");
   startupNote->setWordWrap(true);
@@ -302,7 +303,7 @@ void Mit3hpControlPanel::buildUi() {
   settingsLayout->addWidget(new QLabel(
       "Current setup:\n"
       "- GUI replaces the gamepad and sends a 20 Hz heartbeat. A 300 ms loss requests PASSIVE.\n"
-      "- Joint test enables FR/FL only; it is not a standing pose.\n"
+      "- Joint test enables all four legs; it is not a standing pose.\n"
       "- Balance, locomotion, recovery and jumping remain locked.\n"
       "- Green SPI means a recent valid response, not STM32 command acknowledgement."));
   settingsLayout->addStretch();
@@ -374,11 +375,12 @@ void Mit3hpControlPanel::requestPassive() {
 }
 
 void Mit3hpControlPanel::requestStandUp() {
-  if (QMessageBox::question(this, "Enable front-leg joint test",
-      "Is the robot suspended, with all six front joints checked for direction and zero?\n"
-      "FR/FL will hold [0, 0, 0.02] rad with Kp=5 and Kd=0.2.\n"
-      "HR/HL motors remain off. Press E-STOP/PASSIVE to stop. "
-      "SPI errors do not automatically stop this test.\nContinue?")
+  if (QMessageBox::question(this, "Enable four-leg joint test",
+      "Is the robot suspended, with all 12 joints checked for direction and zero?\n"
+      "All four legs will target [0, 0, 0.02] rad with Kp=5 and Kd=0.2. "
+      "This command has no position ramp.\n"
+      "Press E-STOP/PASSIVE to stop. SPI errors do not automatically "
+      "stop this test.\nContinue?")
       != QMessageBox::Yes) return;
   setRequestedMode(kStandUp, "STAND_UP");
   _balanceButton->setEnabled(false);
