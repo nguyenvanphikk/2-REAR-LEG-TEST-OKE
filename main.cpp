@@ -717,7 +717,9 @@ void spi_isr(void)
 #if STRICT_DROP_ON_CRC_FAIL
     ++g_cmd_bad;
 #if CUT_MOTOR_ON_BAD_SPI
-    if (++g_crc_bad_streak >= SPI_BAD_STREAK_MAX) g_need_cut_motors = 1;
+    if (++g_crc_bad_streak >= SPI_BAD_STREAK_MAX) {
+      g_need_cut_motors = 1;
+    }
 #endif
     ++g_spi_frames;
     spi_prime_first_word();
