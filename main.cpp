@@ -2,7 +2,7 @@
 #include "mbed.h" //
 #include "math_ops.h"
 #include <cstring>
-#include "leg_message.h" //
+#include "leg_message.h" //////
 
 // 1: test one motor over CAN without an SPI master; 0: normal SPIne firmware.
 #define SINGLE_MOTOR_CAN_TEST 0
@@ -15,6 +15,17 @@
 #define SPI_SINGLE_MOTOR_BRINGUP 0
 #define SPI_BRINGUP_CAN_BUS      2
 #define SPI_BRINGUP_MOTOR_ID     1
+
+// Build role. Flash the REAR build to the STM32 that owns the power relays;
+// the FRONT board uses the same two-leg SPI/CAN firmware without relay GPIOs.
+#define SPINE_ROLE_FRONT 0
+#define SPINE_ROLE_REAR  1
+#ifndef SPINE_BOARD_ROLE
+#define SPINE_BOARD_ROLE SPINE_ROLE_REAR
+#endif
+#if (SPINE_BOARD_ROLE != SPINE_ROLE_FRONT) && (SPINE_BOARD_ROLE != SPINE_ROLE_REAR)
+#error "SPINE_BOARD_ROLE must be SPINE_ROLE_FRONT or SPINE_ROLE_REAR"
+#endif
 
 // 文件概览：腿控板作为 SPI 从机接收主机命令并通过两路 CAN 驱动电机，同时返回状态。
 // Google 风格：简要说明文件职责，便于快速理解模块边界。
@@ -29,46 +40,48 @@
 #define CAN_ID   0x0
 
 /// Value Limits（物理约束） ///
-#define P_MIN -12.5f
-#define P_MAX  12.5f
-#define V_MIN -65.0f
-#define V_MAX  65.0f
+#define P_MIN -95.5f
+#define P_MAX  95.5f
+#define V_MIN -45.0f
+#define V_MAX  45.0f
 #define KP_MIN 0.0f
 #define KP_MAX 500.0f
 #define KD_MIN 0.0f
 #define KD_MAX 5.0f
-#define T_MIN -16.0f
-#define T_MAX  16.0f
+#define T_MIN -18.0f
+#define T_MAX  18.0f
 
 /// Joint Soft Stops（软限位） ///
-#define A_LIM_P 0.70f
-#define A_LIM_N -0.70f
-#define H_LIM_P 2.00f
-#define H_LIM_N -2.00f
-// Knee is zero with the leg straight. The joint may flex to about 150 deg.
-// The encoder is motor-side of the additional 1.5:1 belt reduction, so the
-// corresponding motor-angle limit is 2.618 rad * 1.5 = 3.93 rad.
-// These limits assume knee feedback increases while the leg is flexed.
-#define K_LIM_P 3.93f
-#define K_LIM_N -0.10f
+#define A_LIM_P 1.50f
+#define A_LIM_N -1.50f
+#define H_LIM_P 5.00f
+#define H_LIM_N -5.00f
+// Original SPIne knee range for the current motor/reduction configuration.
+#define K_LIM_P 0.20f
+#define K_LIM_N 7.70f
 #define KP_SOFTSTOP 100.0f
 #define KD_SOFTSTOP 0.4f
 
-#define STRICT_DROP_ON_CRC_FAIL 1   // CRC 失败是否直接丢弃命令
-#define CUT_MOTOR_ON_BAD_SPI    1   // 连续 CRC 失败是否触发断电
-#define SPI_BAD_STREAK_MAX      5   // 触发断电的连续失败阈值
+#define STRICT_DROP_ON_CRC_FAIL 1
+#define CUT_MOTOR_ON_BAD_SPI    1
+#define SPI_BAD_STREAK_MAX      5
 #define UART_LOG_PERIOD_MS      200 // 5 Hz: readable without blocking control too much
 #define CAN_FEEDBACK_TIMEOUT_MS 100
 
 // -------------------- 全局对象 --------------------
 spi_data_t    spi_data;         // spine -> host：回传的两腿状态与校验
 spi_command_t spi_command;      // host  -> spine：经校验后的最新指令
-static spi_command_t spi_rx_shadow;    // SPI ISR 暂存的命令，待主循环搬运
+static spi_command_t spi_rx_shadow;
 
 static uint16_t rx_buff[RX_LEN];       // SPI 半字接收缓存
 static uint16_t tx_buff[TX_LEN];       // SPI 半字发送缓存
 
 DigitalOut led(PC_5);                   // 急停指示灯（亮=急停触发）
+#if SPINE_BOARD_ROLE == SPINE_ROLE_REAR
+// DFRobot DFR0457 MOSFET inputs are active-high: 3.3 V = ON, 0 V = OFF.
+DigitalOut precharge_relay(D4, 0);       // D4 / PB5
+DigitalOut main_contactor_relay(D7, 0);  // D7 / PA8
+#endif
 Serial     pc(PA_2, PA_3);              // 上位机调试串口
 
 // 与硬件一致的 CAN 引脚
@@ -86,13 +99,14 @@ leg_state   l1_state, l2_state;         // 两条腿当前状态
 leg_control l1_control, l2_control;     // 两条腿待发送的控制量
 
 volatile int enabled = 0;              // 当前是否已进入力矩模式
+static volatile bool power_ready = false;
 volatile uint32_t g_spi_frames = 0;    // SPI 已处理的帧数
-volatile uint32_t g_cmd_bad    = 0;    // CRC 失败的帧数
+volatile uint32_t g_cmd_bad    = 0;    // SPI frames with wrong length or checksum
 volatile int      g_last_len   = 0;    // 上一帧实际接收的半字数
-static volatile int spi_ready  = 0;    // SPI 是否完成初始化
-static volatile int g_cmd_pending = 0; // 是否有待处理的 SPI 命令帧
-static volatile int g_need_cut_motors = 0; // 是否需要立即退出力矩模式
-static volatile int g_crc_bad_streak = 0;  // 连续 CRC 失败次数
+static volatile int spi_ready = 0;
+static volatile int g_cmd_pending = 0;
+static volatile int g_need_cut_motors = 0;
+static volatile int g_crc_bad_streak = 0;
 static volatile int counter2 = 0;      // 站立模式计数器（预留）
 static volatile int is_standing = 0;   // 站立模式标志位
 
@@ -105,9 +119,64 @@ static uint32_t g_can_bad_len = 0;
 static uint32_t g_can_tx_ok = 0;
 static uint32_t g_can_tx_fail = 0;
 
-// 将 TX 缓冲区的第一个 16bit 预写入 SPI DR，确保片选拉低时立即输出。
-static inline void spi_prime_first_word(void){
-  if(!spi_ready) return;
+static const char* board_role_name(void) {
+#if SPINE_BOARD_ROLE == SPINE_ROLE_REAR
+  return "REAR";
+#else
+  return "FRONT";
+#endif
+}
+
+static void power_off(void) {
+  power_ready = false;
+#if SPINE_BOARD_ROLE == SPINE_ROLE_REAR
+  main_contactor_relay = 0;
+  precharge_relay = 0;
+#endif
+}
+
+static bool run_precharge_sequence(void) {
+  power_off();
+  wait_ms(100);
+  if (estop.read() == 0) {
+    pc.printf("[POWER] ESTOP active; precharge cancelled\n\r");
+    return false;
+  }
+
+#if SPINE_BOARD_ROLE == SPINE_ROLE_REAR
+  pc.printf("[POWER] precharge ON (D4/PB5)\n\r");
+  precharge_relay = 1;
+  for (int elapsed_ms = 0; elapsed_ms < 5000; elapsed_ms += 10) {
+    if (estop.read() == 0) {
+      power_off();
+      pc.printf("[POWER] ESTOP during precharge\n\r");
+      return false;
+    }
+    wait_ms(10);
+  }
+
+  pc.printf("[POWER] main contactor ON (D7/PA8)\n\r");
+  main_contactor_relay = 1;
+  wait_ms(200);
+  if (estop.read() == 0) {
+    power_off();
+    pc.printf("[POWER] ESTOP while closing contactor\n\r");
+    return false;
+  }
+
+  precharge_relay = 0;
+  power_ready = true;
+  pc.printf("[POWER] precharge OFF; motor bus ready\n\r");
+  return true;
+#else
+  power_ready = true;
+  pc.printf("[POWER] FRONT board ready; precharge is managed by REAR board\n\r");
+  return true;
+#endif
+}
+
+static inline void spi_prime_first_word(void) {
+  if (!spi_ready) return;
   SPI1->DR = tx_buff[0];
 }
 
@@ -213,7 +282,7 @@ void PackAll(){
   h1_can.id = h2_can.id = 0x2;
   k1_can.id = k2_can.id = 0x3;
 }
-// 依次向两条 CAN 总线写入关节命令，150us 间隔避免突发阻塞。
+// Keep 150 us between CAN writes as in the previous working version.
 void WriteAll(){
   can_write_logged(can1, a1_can); wait_us(150);
   can_write_logged(can2, a2_can); wait_us(150);
@@ -324,11 +393,13 @@ static void test_print_help() {
 static void test_process_line(char* line) {
   float value;
   int number;
-  if (line[0] == 'm' && line[1] == '\0') {
+  if (line[0] == 'm' && line[1] == '\0' && power_ready && estop.read()) {
     test_send_special(0xFC);
     wait_ms(100);
     test_enabled = true;
     pc.printf("OK enabled: bus=%d id=%d\n\r", test_bus, test_motor_id);
+  } else if (line[0] == 'm' && line[1] == '\0') {
+    pc.printf("ERR: motor power is not ready or ESTOP is active\n\r");
   } else if (line[0] == 'x' && line[1] == '\0') {
     test_velocity = 0.0f;
     if (test_enabled) { test_send_velocity(); wait_ms(20); }
@@ -453,7 +524,8 @@ static void print_motor_log(int leg_number, int motor_id, const char *joint_name
 
 static void print_full_diagnostics(uint32_t now_ms, uint32_t frame_delta,
                                    uint32_t bad_delta) {
-  pc.printf("\n\r========== STM32 SPINE: 2 LEGS / 6 MOTORS ==========\n\r");
+  pc.printf("\n\r========== STM32 SPINE %s: 2 LEGS / 6 MOTORS ==========\n\r",
+            board_role_name());
   pc.printf("SYS enabled=%d estop=%s | SPI frames=%lu (+%lu) bad=%lu (+%lu) len=%d\n\r",
             enabled, estop.read() ? "OK" : "ACTIVE",
             (unsigned long)g_spi_frames, (unsigned long)frame_delta,
@@ -487,7 +559,8 @@ void control_and_build_tx(){
 #else
       (spi_command.flags[0] | spi_command.flags[1]) & 0x1;
 #endif
-  if((torque_en == 1) && (enabled==0)){
+  const bool torque_allowed = (torque_en == 1) && power_ready && estop.read();
+  if(torque_allowed && (enabled==0)){
     enabled = 1;
 #if SPI_SINGLE_MOTOR_BRINGUP
     send_bringup_special(0xFC);
@@ -500,7 +573,7 @@ void control_and_build_tx(){
     EnterMotorMode(&h2_can); can_write_logged(can2, h2_can);
 #endif
     pc.printf("[MOTOR] enter torque mode (estop=%d)\n\r", estop.read());
-  } else if((torque_en == 0) && (enabled==1)){
+  } else if(!torque_allowed && (enabled==1)){
     enabled = 0;
 #if SPI_SINGLE_MOTOR_BRINGUP
     send_bringup_special(0xFD);
@@ -577,12 +650,14 @@ void control_and_build_tx(){
     spi_data.flags[0]  = 0;
     spi_data.flags[0] |= softstop_joint(l1_state.a, &l1_control.a, A_LIM_P, A_LIM_N);
     spi_data.flags[0] |= (softstop_joint(l1_state.h, &l1_control.h, H_LIM_P, H_LIM_N))<<1;
-    spi_data.flags[0] |= (softstop_joint(l1_state.k, &l1_control.k, K_LIM_P, K_LIM_N))<<2;
+    // Keep the established SPIne behavior: knee soft stop is not applied here.
+    // spi_data.flags[0] |= (softstop_joint(l1_state.k, &l1_control.k, K_LIM_P, K_LIM_N))<<2;
 
     spi_data.flags[1]  = 0;
     spi_data.flags[1] |= softstop_joint(l2_state.a, &l2_control.a, A_LIM_P, A_LIM_N);
     spi_data.flags[1] |= (softstop_joint(l2_state.h, &l2_control.h, H_LIM_P, H_LIM_N))<<1;
-    spi_data.flags[1] |= (softstop_joint(l2_state.k, &l2_control.k, K_LIM_P, K_LIM_N))<<2;
+    // Keep the established SPIne behavior: knee soft stop is not applied here.
+    // spi_data.flags[1] |= (softstop_joint(l2_state.k, &l2_control.k, K_LIM_P, K_LIM_N))<<2;
   }
 
   // ===== 关键修复：按“线上半字流”计算校验，并回填到 tx_buff[28..29] =====
@@ -597,22 +672,18 @@ void control_and_build_tx(){
   spi_data.checksum = chk;                      // 仅作串口观测（线上以 tx_buff 为准）
   for (int i = 30; i < TX_LEN; i++) tx_buff[i] = 0;  // 清理尾部
 
-  // 将首个 16bit 预写入 SPI1->DR，确保主机采到当前帧。
   spi_prime_first_word();
-
 }
 
 // ===== SPI 中断（全双工搬运）=====
-// 片选为低期间：TXE 时塞下一个半字，RXNE 时收主机半字；结束后校验长度与 XOR。
-// 校验通过则将 spi_rx_shadow 搬到命令缓冲并置 g_cmd_pending，交由主循环消费。
+// Receive and validate SPI here; the main loop handles control and CAN.
 void spi_isr(void)
 {
   int rx_i = 0;
-  int tx_i = 1;  // tx_buff[0] 已由 spi_prime_first_word 预写入
+  int tx_i = 1;  // tx_buff[0] is already primed
 
   while (cs == 0) {
     uint32_t sr = SPI1->SR;
-
     if ((sr & SPI_SR_TXE) && (tx_i < TX_LEN)) {
       SPI1->DR = tx_buff[tx_i++];
     }
@@ -634,39 +705,28 @@ void spi_isr(void)
     dump = SPI1->SR;
     (void)dump;
   }
-  // 校验 host 命令（按线上 32×u32 = 64 半字 + checksum 的前 32×u32 计算）
   const bool len_ok = (g_last_len == CMD_LEN);
   uint32_t calc_checksum = 0;
-  if(len_ok){
-    for(int i = 0; i < CMD_LEN; i++){
+  if (len_ok) {
+    for (int i = 0; i < CMD_LEN; i++) {
       ((uint16_t*)(&spi_rx_shadow))[i] = rx_buff[i];
     }
     calc_checksum = xor_checksum_u32((uint32_t*)rx_buff, 32);
   }
-
-  // 严格 CRC：长度或校验失败则丢帧，必要时累计错误触发断电。
-  if (!len_ok || (spi_rx_shadow.checksum != calc_checksum)) {
+  if (!len_ok || spi_rx_shadow.checksum != calc_checksum) {
 #if STRICT_DROP_ON_CRC_FAIL
-    g_cmd_bad++;
+    ++g_cmd_bad;
 #if CUT_MOTOR_ON_BAD_SPI
-    if(++g_crc_bad_streak >= SPI_BAD_STREAK_MAX){
-      g_need_cut_motors = 1;
-    }
+    if (++g_crc_bad_streak >= SPI_BAD_STREAK_MAX) g_need_cut_motors = 1;
 #endif
-    // 不更新 spi_command/tx_buff，只返回，继续发送上一帧缓存。
-    g_spi_frames++;
+    ++g_spi_frames;
     spi_prime_first_word();
     return;
-#else
-    // 宽松模式：即便 CRC 失败也放行（仅调试用）。
 #endif
   }
 
   g_crc_bad_streak = 0;
-
-  // CRC pass: notify main loop to process command
   g_cmd_pending = 1;
-
   g_spi_frames++;
 }
 
@@ -676,7 +736,7 @@ void init_spi(void){
   pc.printf("SPI Init ...\n\r");
   SPISlave *spi = new SPISlave(PA_7, PA_6, PA_5, PA_4); // MOSI, MISO, SCK, CS
   spi->format(16, 0);       // 16bit, Mode 0
-  spi->frequency(5000000);  // 与 Jetson 保持 1MHz
+  spi->frequency(5000000);
   spi->reply(0xff);
   cs.fall(&spi_isr);
   spi_ready = 1;
@@ -689,22 +749,22 @@ void init_spi(void){
 // 1) 轮询 CAN 反馈；2) 处理 SPI 新命令（如有）；3) 定期输出统计。
 #if !SINGLE_MOTOR_CAN_TEST
 int main() {
-  wait(1);  // 上电等待，确保驱动和主机稳定
   pc.baud(921600);
   pc.attach(&serial_isr, Serial::RxIrq); // 绑定串口接收中断，处理键盘指令（含 z -> zeroing）
   estop.mode(PullUp);
+  pc.printf("\n\r[BOOT] STM32 SPINE role=%s\n\r", board_role_name());
+  run_precharge_sequence();
   // Keep SPI CS (PA4) at a defined HIGH level while the Jetson CS output is
   // idle or temporarily high-impedance during boot/reset.
   cs.mode(PullUp);
 
-  // 允许所有标准帧，便于驱动通信与调试。
   can1.filter(0, 0, CANStandard, 0);
   can2.filter(0, 0, CANStandard, 0);
 
   memset(&tx_buff,   0, sizeof(tx_buff));
   memset(&spi_data,  0, sizeof(spi_data));
   memset(&spi_command, 0, sizeof(spi_command));
-  memset(&spi_rx_shadow,0, sizeof(spi_rx_shadow));
+  memset(&spi_rx_shadow, 0, sizeof(spi_rx_shadow));
 
   a1_can.len = a2_can.len = h1_can.len = h2_can.len = k1_can.len = k2_can.len = 8; // 关节命令帧 8 字节
   rxMsg1.len = rxMsg2.len = 6;  // 驱动反馈帧 6 字节
@@ -735,6 +795,10 @@ int main() {
   uint32_t last_ms = 0, last_frames = 0, last_bad = 0;
 
   while(1) {
+    if (estop.read() == 0 && power_ready) {
+      power_off();  // Latched off; restarting requires an STM32 reset.
+      pc.printf("[POWER] ESTOP: contactor opened; reset required\n\r");
+    }
     uint32_t now = t.read_ms();
     // 1) 轮询 CAN 反馈。
 #if SPI_SINGLE_MOTOR_BRINGUP
@@ -751,7 +815,6 @@ int main() {
 #endif
     wait_us(50);
 
-    // 2) CRC 连续异常时的保护：必要时立即退出力矩。
     if (g_need_cut_motors) {
       g_need_cut_motors = 0;
 #if CUT_MOTOR_ON_BAD_SPI
@@ -771,7 +834,6 @@ int main() {
 #endif
     }
 
-    // 3) 有新的 SPI 命令帧：原子搬运 shadow -> command，再刷新 TX/CAN。
     if (g_cmd_pending) {
       __disable_irq();
       spi_command = spi_rx_shadow;
@@ -787,7 +849,7 @@ int main() {
 #endif
     }
 
-    // 4) Print all six motor feedback channels and communication health at 5 Hz.
+    // Print all six motor feedback channels and communication health at 5 Hz.
     if (now - last_ms >= UART_LOG_PERIOD_MS) {
       uint32_t df = g_spi_frames - last_frames;
       uint32_t db = g_cmd_bad    - last_bad;
@@ -801,9 +863,9 @@ int main() {
 }
 #else
 int main() {
-  wait(1);
   pc.baud(115200);
   estop.mode(PullUp);
+  run_precharge_sequence();
   can1.filter(0, 0, CANStandard, 0);
   can2.filter(0, 0, CANStandard, 14);
 
@@ -821,6 +883,10 @@ int main() {
   int line_length = 0;
 
   while (1) {
+    if (estop.read() == 0 && power_ready) {
+      power_off();  // Latched off; restarting requires an STM32 reset.
+      pc.printf("\n\r[POWER] ESTOP: contactor opened; reset required\n\r> ");
+    }
     while (pc.readable()) {
       char c = pc.getc();
       if (c == '\r' || c == '\n') {
