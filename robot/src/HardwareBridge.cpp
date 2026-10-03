@@ -10,6 +10,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <cstring>
+#include <cstdlib>
 #include <thread>
 #include <chrono>
 #include "Configuration.h"
@@ -305,6 +306,9 @@ void MiniCheetahHardwareBridge::run() {
   _robotRunner->spiHealthMutex = &_spiHealthMutex;
   _robotRunner->spiHealth = _spiHealth;
   _robotRunner->lastGuiCommandUs = &_lastGuiCommandUs;
+  _robotRunner->suspendedRearNoImu =
+      std::getenv("MIT3HP_REAR_TEST_NO_IMU") &&
+      std::strcmp(std::getenv("MIT3HP_REAR_TEST_NO_IMU"), "1") == 0;
   _robotRunner->robotType = RobotType::MINI_CHEETAH;
   _robotRunner->vectorNavData = &_vectorNavData;
   _robotRunner->controlParameters = &_robotParams;
@@ -392,9 +396,15 @@ void MiniCheetahHardwareBridge::logMicrostrain() {
 void MiniCheetahHardwareBridge::initHardware() {
   _vectorNavData.quat << 1, 0, 0, 0;
 #ifndef USE_MICROSTRAIN
-  printf("[MiniCheetahHardware] Init vectornav\n");
-  if (!init_vectornav(&_vectorNavData)) {
-    initError("failed to initialize vectornav or receive valid data!\n", false);
+  const char* rearNoImu = std::getenv("MIT3HP_REAR_TEST_NO_IMU");
+  if (rearNoImu && std::strcmp(rearNoImu, "1") == 0) {
+    printf("[MiniCheetahHardware] Suspended rear test: VectorNav disabled; "
+           "only PASSIVE and rear STAND_UP may be used.\n");
+  } else {
+    printf("[MiniCheetahHardware] Init vectornav\n");
+    if (!init_vectornav(&_vectorNavData)) {
+      initError("failed to initialize vectornav or receive valid data!\n", false);
+    }
   }
 #endif
 

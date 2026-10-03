@@ -2,6 +2,15 @@
 
 MIT_Controller::MIT_Controller():RobotController(){  }
 
+int MIT_Controller::getRearTestStage() const {
+  return _controlFSM && _controlFSM->currentState->stateName == FSM_StateName::STAND_UP
+             ? _controlFSM->statesList.standUp->rearTestStage() : 0;
+}
+
+int MIT_Controller::getRearTestFault() const {
+  return _controlFSM ? _controlFSM->statesList.standUp->rearTestFault() : 0;
+}
+
 int MIT_Controller::getControllerMode() const {
   if (!_controlFSM || !_controlFSM->currentState) return K_PASSIVE;
   switch (_controlFSM->currentState->stateName) {
@@ -51,4 +60,3 @@ void MIT_Controller::runController() {
   // Run the Control FSM code
   _controlFSM->runFSM();
 }
-

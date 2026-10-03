@@ -58,6 +58,7 @@ class RobotRunner : public PeriodicTask {
   std::mutex* spiHealthMutex = nullptr;
   spi_board_health_t* spiHealth = nullptr;
   std::atomic<uint64_t>* lastGuiCommandUs = nullptr;
+  bool suspendedRearNoImu = false;
   TiBoardCommand* tiBoardCommand;
   TiBoardData* tiBoardData;
   RobotControlParameters* controlParameters;
@@ -92,6 +93,10 @@ class RobotRunner : public PeriodicTask {
   bool _guiWatchdogOk = true;
   int _safetyReason = 0;
   spi_board_health_t _spiHealthSnapshot[2]{};
+  uint64_t _spiWindowStartUs = 0;
+  uint64_t _spiWindowTx[2]{0, 0};
+  uint64_t _spiWindowGood[2]{0, 0};
+  bool _spiWindowHealthy = true;
 };
 
 #endif  // PROJECT_ROBOTRUNNER_H

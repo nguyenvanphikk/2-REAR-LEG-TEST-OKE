@@ -5,6 +5,8 @@ struct mit3hp_status_lcmt {
   int32_t motors_enabled;
   int32_t gui_watchdog_ok;
   int32_t safety_reason;
+  int32_t rear_test_stage;
+  int32_t rear_test_fault;
   int64_t spi_tx_frames[2];
   int32_t spi_tx_flags[2];
   int64_t spi_success[2];

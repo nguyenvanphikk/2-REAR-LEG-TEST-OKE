@@ -21,6 +21,8 @@ public:
   }
   virtual void Estop(){ _controlFSM->initialize(); }
   int getControllerMode() const override;
+  int getRearTestStage() const override;
+  int getRearTestFault() const override;
 
 
 protected:

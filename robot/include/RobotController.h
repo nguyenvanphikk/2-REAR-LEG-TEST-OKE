@@ -32,6 +32,8 @@ public:
   virtual ControlParameters* getUserControlParameters() = 0;
   virtual void Estop() {}
   virtual int getControllerMode() const { return -1; }
+  virtual int getRearTestStage() const { return 0; }
+  virtual int getRearTestFault() const { return 0; }
 
 protected:
   Quadruped<float>* _quadruped = nullptr;

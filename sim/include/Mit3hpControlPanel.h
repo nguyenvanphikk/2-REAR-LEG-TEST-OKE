@@ -55,6 +55,8 @@ class Mit3hpControlPanel : public QMainWindow {
   void refreshUi();
   void requestPassive();
   void requestStandUp();
+  void requestRearPose();
+  void requestAirTrot();
   void requestBalance();
   void requestLocomotion();
   void resetMotion();
@@ -95,6 +97,9 @@ class Mit3hpControlPanel : public QMainWindow {
   std::atomic<bool> _running{true};
   uint64_t _requestNumber = 0;
   int _requestedMode = kPassive;
+  int _rearRequestedStage = 0;
+  int _rearActualStage = 0;
+  int _rearFault = 0;
   QString _requestedModeName = "PASSIVE";
   QString _lastAutoPassiveReason;
   int64_t _lastAutoPassiveMs = 0;
@@ -148,6 +153,9 @@ class Mit3hpControlPanel : public QMainWindow {
   QLabel* _boardStatus[2]{nullptr, nullptr};
   QTableWidget* _motorTable = nullptr;
   QPushButton* _standButton = nullptr;
+  QPushButton* _rearPoseButton = nullptr;
+  QPushButton* _airTrotButton = nullptr;
+  QLabel* _rearStageStatus = nullptr;
   QPushButton* _balanceButton = nullptr;
   QPushButton* _walkButton = nullptr;
   VirtualJoystick* _moveStick = nullptr;

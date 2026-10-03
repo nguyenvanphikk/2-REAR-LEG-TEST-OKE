@@ -87,7 +87,21 @@ void RobotRunner::init() {
 void RobotRunner::run() {
   // Run the state estimator step
   //_stateEstimator->run(cheetahMainVisualization);
-  _stateEstimator->run();
+  if (!suspendedRearNoImu) {
+    _stateEstimator->run();
+  } else {
+    _stateEstimate.position.setZero();
+    _stateEstimate.vBody.setZero();
+    _stateEstimate.vWorld.setZero();
+    _stateEstimate.contactEstimate.setZero();
+    _stateEstimate.rpy.setZero();
+    _stateEstimate.aBody.setZero();
+    _stateEstimate.aWorld.setZero();
+    _stateEstimate.omegaBody.setZero();
+    _stateEstimate.omegaWorld.setZero();
+    _stateEstimate.orientation << 1.f, 0.f, 0.f, 0.f;
+    _stateEstimate.rBody.setIdentity();
+  }
   //cheetahMainVisualization->p = _stateEstimate.position;
   visualizationData->clear();
 
@@ -104,7 +118,8 @@ void RobotRunner::run() {
             std::chrono::steady_clock::now().time_since_epoch()).count();
     const uint64_t lastUs = lastGuiCommandUs->load(std::memory_order_relaxed);
     _guiWatchdogOk = lastUs != 0 && nowUs - lastUs <= 300000;
-    if (!_guiWatchdogOk) {
+    if (!_guiWatchdogOk && controlParameters->control_mode != 1 &&
+        _robot_ctrl->getControllerMode() != 1) {
       _safetyReason = 1;
       driverCommand->zero();
       controlParameters->control_mode = 0;
@@ -120,8 +135,13 @@ void RobotRunner::run() {
       _spiHealthSnapshot[0] = spiHealth[0];
       _spiHealthSnapshot[1] = spiHealth[1];
     }
-    // Thong ke SPI chi de quan sat trong phep thu hai chan truoc; khong dung
-    // tuoi response SPI de tu chuyen FSM ve PASSIVE.
+    // Diagnostic rear test: SPI health is telemetry only; no automatic cutoff.
+  }
+
+  if (suspendedRearNoImu && controlParameters->control_mode != 0 &&
+      controlParameters->control_mode != 1) {
+    _safetyReason = 5;
+    controlParameters->control_mode = 0;
   }
 
   static int count_ini(0);
@@ -165,6 +185,7 @@ void RobotRunner::run() {
         }
       } else {
         _robot_ctrl->runController();
+        if (_safetyReason != 0) _legController->setEnabled(false);
         cheetahMainVisualization->p = _stateEstimate.position;
 
         // Update Visualization
@@ -246,6 +267,16 @@ void RobotRunner::finalizeStep() {
   if (robotType == RobotType::MINI_CHEETAH) {
     const auto writeSpiCommand = [&]() {
       _legController->updateCommand(spiCommand);
+      // During the temporary joint test, only HR/HL may enter motor mode.
+      // Continue reading FR/FL feedback while sending disabled commands.
+      if (_robot_ctrl->getControllerMode() == 1) {
+        for (int leg = 0; leg < 2; ++leg) {
+          spiCommand->flags[leg] = 0;
+          spiCommand->kp_abad[leg] = spiCommand->kp_hip[leg] = spiCommand->kp_knee[leg] = 0;
+          spiCommand->kd_abad[leg] = spiCommand->kd_hip[leg] = spiCommand->kd_knee[leg] = 0;
+          spiCommand->tau_abad_ff[leg] = spiCommand->tau_hip_ff[leg] = spiCommand->tau_knee_ff[leg] = 0;
+        }
+      }
     };
     // Tao tron goi command trong mot lan khoa ngan. SPI task chi lay snapshot
     // sau khi updateCommand() da ghi xong ca 12 khop.
@@ -278,6 +309,8 @@ void RobotRunner::finalizeStep() {
       mit3hp_status_lcm.motors_enabled |= (spiCommand->flags[leg] & 1) != 0;
     mit3hp_status_lcm.gui_watchdog_ok = _guiWatchdogOk;
     mit3hp_status_lcm.safety_reason = _safetyReason;
+    mit3hp_status_lcm.rear_test_stage = _robot_ctrl->getRearTestStage();
+    mit3hp_status_lcm.rear_test_fault = _robot_ctrl->getRearTestFault();
     for (int board = 0; board < 2; board++) {
       mit3hp_status_lcm.spi_tx_frames[board] =
           _spiHealthSnapshot[board].transmitted_frames;

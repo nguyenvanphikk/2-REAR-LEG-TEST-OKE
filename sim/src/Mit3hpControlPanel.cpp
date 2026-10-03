@@ -186,7 +186,7 @@ void Mit3hpControlPanel::buildUi() {
   controlLayout->addWidget(emergency);
 
   auto* modes = new QHBoxLayout;
-  _standButton = new QPushButton("1. FOUR-LEG JOINT TEST");
+  _standButton = new QPushButton("1. PREPARE HR/HL [0, 0, 0.02]");
   _balanceButton = new QPushButton("2. BALANCE");
   _walkButton = new QPushButton("3. LOCOMOTION");
   for (auto* b : {_standButton, _balanceButton, _walkButton}) {
@@ -200,11 +200,25 @@ void Mit3hpControlPanel::buildUi() {
   connect(_walkButton, &QPushButton::clicked, this,
           &Mit3hpControlPanel::requestLocomotion);
   controlLayout->addLayout(modes);
+  auto* rearStages = new QHBoxLayout;
+  _rearPoseButton = new QPushButton("2. MOVE HR/HL TO [0, -0.8, 1.6]");
+  _airTrotButton = new QPushButton("3. AIR TROT (SUSPENDED ONLY)");
+  rearStages->addWidget(_rearPoseButton);
+  rearStages->addWidget(_airTrotButton);
+  controlLayout->addLayout(rearStages);
+  connect(_rearPoseButton, &QPushButton::clicked, this,
+          &Mit3hpControlPanel::requestRearPose);
+  connect(_airTrotButton, &QPushButton::clicked, this,
+          &Mit3hpControlPanel::requestAirTrot);
+  _rearStageStatus = new QLabel("Rear test: PASSIVE");
+  _rearStageStatus->setStyleSheet("font-weight:bold;color:#172033;");
+  controlLayout->addWidget(_rearStageStatus);
   auto* startupNote = new QLabel(
-      "FOUR-LEG JOINT TEST: All four legs target abad=0, hip=0, "
-      "knee=0.02 rad with Kp=5 and Kd=0.2. Suspend the robot before testing. "
-      "This is not a load-bearing standing pose. "
-      "Press E-STOP/PASSIVE to stop. SPI warnings do not end this test. "
+      "SUSPENDED REAR-LEG TEST: Prepare slowly, confirm, move to pose slowly, "
+      "confirm, then use the movement stick for a small air trot. "
+      "FR/FL motors remain off. VectorNav is not used by this test. "
+      "SPI and GUI heartbeat warnings do not automatically stop this diagnostic test. "
+      "Keep a physical motor power cut within reach. "
       "Balance and locomotion are locked.");
   startupNote->setWordWrap(true);
   startupNote->setStyleSheet("color:#b42318;font-weight:bold;");
@@ -225,7 +239,7 @@ void Mit3hpControlPanel::buildUi() {
   gaitRow->addWidget(_gaitSelector, 1);
   controlLayout->addLayout(gaitRow);
 
-  auto* motionBox = new QGroupBox("2D virtual joysticks (active only when locomotion is unlocked)");
+  auto* motionBox = new QGroupBox("Virtual joysticks (movement up/down controls suspended air trot)");
   auto* motionLayout = new QVBoxLayout(motionBox);
   auto* sticks = new QHBoxLayout;
   auto* moveColumn = new QVBoxLayout;
@@ -262,12 +276,15 @@ void Mit3hpControlPanel::buildUi() {
 
   auto* motors = new QWidget;
   auto* motorsLayout = new QVBoxLayout(motors);
-  auto* note = new QLabel("Monitor only. This table does not command individual motors.");
+  auto* note = new QLabel(
+      "Monitor only. Joint angles use Jetson sign/scale and encoder zero; physical calibration must be verified. "
+      "Red cells show stale feedback; they do not confirm the current physical angle.");
+  note->setWordWrap(true);
   note->setStyleSheet("color:#b42318;font-weight:bold;");
   motorsLayout->addWidget(note);
-  _motorTable = new QTableWidget(12, 12);
+  _motorTable = new QTableWidget(12, 13);
   _motorTable->setHorizontalHeaderLabels(
-      {"Joint", "q [rad]", "qd [rad/s]", "q target [rad]",
+      {"Joint", "Joint q [rad]", "Joint angle [deg / rad]", "qd [rad/s]", "q target [rad]",
        "qd target [rad/s]", "Estimated torque [Nm]", "Kp", "Kd",
        "Sign / scale", "Offset [rad]", "Gear ratio", "Feedback flags"});
   const char* legs[] = {"FR", "FL", "HR", "HL"};
@@ -277,6 +294,15 @@ void Mit3hpControlPanel::buildUi() {
       _motorTable->setItem(leg * 3 + joint, 0,
           new QTableWidgetItem(QString("%1 %2").arg(legs[leg], joints[joint])));
   _motorTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+  _motorTable->horizontalHeader()->setMinimumSectionSize(90);
+  _motorTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
+  _motorTable->setColumnWidth(2, 180);
+  _motorTable->horizontalHeaderItem(1)->setToolTip(
+      "Motor feedback converted by Jetson: q_joint = (q_STM32 - offset) * sign/scale. "
+      "Abad/hip use +/-1; knee uses +/-1/1.5. No additional gearbox division is applied here.");
+  _motorTable->horizontalHeaderItem(2)->setToolTip(
+      "Same joint q as the adjacent column, shown in degrees and radians relative to encoder zero. "
+      "This is a unit conversion, not a separate physical angle measurement.");
   _motorTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
   motorsLayout->addWidget(_motorTable);
   tabs->addTab(motors, "MOTORS");
@@ -302,8 +328,9 @@ void Mit3hpControlPanel::buildUi() {
   auto* settingsLayout = new QVBoxLayout(settings);
   settingsLayout->addWidget(new QLabel(
       "Current setup:\n"
-      "- GUI replaces the gamepad and sends a 20 Hz heartbeat. A 300 ms loss requests PASSIVE.\n"
-      "- Joint test enables all four legs; it is not a standing pose.\n"
+      "- GUI sends a 20 Hz heartbeat. During the rear diagnostic test, heartbeat loss does not stop motors.\n"
+      "- Rear test: HR/HL only. No speed, tracking, move-timeout or SPI cutoff; non-finite feedback still stops motors.\n"
+      "- IMU is optional only in this suspended test; run controller with MIT3HP_REAR_TEST_NO_IMU=1 when disconnected.\n"
       "- Balance, locomotion, recovery and jumping remain locked.\n"
       "- Green SPI means a recent valid response, not STM32 command acknowledgement."));
   settingsLayout->addStretch();
@@ -369,22 +396,46 @@ void Mit3hpControlPanel::setRequestedMode(int mode, const QString& name) {
 }
 
 void Mit3hpControlPanel::requestPassive() {
+  _rearRequestedStage = 0;
+  resetMotion();
   setRequestedMode(kPassive, "PASSIVE");
   _balanceButton->setEnabled(false);
   _walkButton->setEnabled(false);
 }
 
 void Mit3hpControlPanel::requestStandUp() {
-  if (QMessageBox::question(this, "Enable four-leg joint test",
-      "Is the robot suspended, with all 12 joints checked for direction and zero?\n"
-      "All four legs will target [0, 0, 0.02] rad with Kp=5 and Kd=0.2. "
-      "This command has no position ramp.\n"
-      "Press E-STOP/PASSIVE to stop. SPI errors do not automatically "
-      "stop this test.\nContinue?")
+  if (QMessageBox::question(this, "Prepare suspended rear legs",
+      "Is the robot suspended, with all six rear joints checked for direction and zero?\n"
+      "HR/HL will move slowly from measured angles to [0, 0, 0.02] rad. "
+      "FR/FL motors stay off. Keep the physical motor cut within reach.\nContinue?")
       != QMessageBox::Yes) return;
+  _rearRequestedStage = 1;
   setRequestedMode(kStandUp, "STAND_UP");
   _balanceButton->setEnabled(false);
   _walkButton->setEnabled(false);
+}
+
+void Mit3hpControlPanel::requestRearPose() {
+  {
+    std::lock_guard<std::mutex> lock(_dataMutex);
+    if (_rearActualStage != 2) return;
+  }
+  if (QMessageBox::question(this, "Move rear legs to pose",
+      "HR/HL will move slowly (at least 15 seconds) to [0, -0.8, 1.6] rad. "
+      "Confirm both legs are clear and suspended. Continue?") != QMessageBox::Yes) return;
+  _rearRequestedStage = 2;
+}
+
+void Mit3hpControlPanel::requestAirTrot() {
+  {
+    std::lock_guard<std::mutex> lock(_dataMutex);
+    if (_rearActualStage != 4) return;
+  }
+  if (QMessageBox::question(this, "Enable slow air trot",
+      "HR/HL will alternate at an 8-second cycle only while the movement "
+      "stick is held. Start with a very small stick deflection. Continue?")
+      != QMessageBox::Yes) return;
+  _rearRequestedStage = 3;
 }
 
 void Mit3hpControlPanel::requestBalance() {
@@ -405,6 +456,13 @@ void Mit3hpControlPanel::resetMotion() {
 void Mit3hpControlPanel::publishCommand() {
   gamepad_lcmt msg{};
   const float limit = _commandLimit ? _commandLimit->value() / 100.f : 0.f;
+  if (_requestedMode == kStandUp) {
+    msg.x = _rearRequestedStage == 1;
+    msg.y = _rearRequestedStage == 2;
+    msg.b = _rearRequestedStage == 3;
+    if (_rearRequestedStage == 3)
+      msg.leftStickAnalog[1] = _moveStick->value().y() * qMin(limit, 0.2f);
+  }
   if (_requestedMode == kBalanceStand || _requestedMode == kLocomotion) {
     const QPointF move = _moveStick->value();
     const QPointF turn = _turnStick->value();
@@ -472,6 +530,8 @@ void Mit3hpControlPanel::handleRobotStatus(
   _motorsEnabled = msg->motors_enabled != 0;
   _watchdogOk = msg->gui_watchdog_ok != 0;
   _safetyReason = msg->safety_reason;
+  _rearActualStage = msg->rear_test_stage;
+  _rearFault = msg->rear_test_fault;
   for (int board = 0; board < 2; board++) {
     _spiTxFrames[board] = msg->spi_tx_frames[board];
     _spiTxFlags[board] = msg->spi_tx_flags[board];
@@ -506,7 +566,7 @@ void Mit3hpControlPanel::refreshUi() {
   spi_data_t spi;
   vectornav_lcmt imu;
   int64_t imuMs, ctrlMs, statusMs;
-  int actualMode;
+  int actualMode, rearStage, rearFault;
   bool motorsEnabled, watchdogOk;
   int safetyReason;
   int64_t txFrames[2];
@@ -525,6 +585,8 @@ void Mit3hpControlPanel::refreshUi() {
     ctrlMs = _lastControllerMs;
     statusMs = _lastStatusMs;
     actualMode = _actualMode;
+    rearStage = _rearActualStage;
+    rearFault = _rearFault;
     motorsEnabled = _motorsEnabled;
     watchdogOk = _watchdogOk;
     safetyReason = _safetyReason;
@@ -555,20 +617,45 @@ void Mit3hpControlPanel::refreshUi() {
       ? -1 : qMax(boardAgeMs[0], boardAgeMs[1]);
   setHealth(_spiStatus, "SPI VALID RESPONSE 1.0 + 1.1", worstSpiAge, 100, 300);
   setHealth(_imuStatus, "VECTORNAV", imuMs ? now - imuMs : -1, 30, 300);
+  if (!imuMs)
+    _imuStatus->setText("VECTORNAV\nOPTIONAL FOR SUSPENDED REAR TEST");
   const char* modeNames[] = {"PASSIVE", "STAND_UP", "?", "BALANCE", "LOCOMOTION"};
   const QString actualName = actualMode >= 0 && actualMode <= 4
       ? modeNames[actualMode] : QString("MODE %1").arg(actualMode);
   _modeStatus->setText(QString("ACTUAL MODE: %1\nREQUESTED: %2 | MOTOR: %3")
       .arg(actualName, _requestedModeName, motorsEnabled ? "ON" : "OFF"));
+  const char* rearNames[] = {"PASSIVE", "MOVING TO PREPARE", "PREPARED / HOLD",
+      "MOVING TO POSE", "POSE / HOLD", "AIR TROT / IDLE",
+      "AIR TROT / MOVING", "FAULT / PASSIVE"};
+  QString rearFaultText = QString("Fault %1").arg(rearFault);
+  for (int base : {10, 20, 30}) {
+    if (rearFault >= base && rearFault < base + 6) {
+      const int index = rearFault - base;
+      const char* joints[] = {"ABAD", "HIP", "KNEE"};
+      rearFaultText = QString("%1 %2: %3")
+          .arg(index < 3 ? "HR" : "HL", joints[index % 3],
+               base == 10 ? "INVALID FEEDBACK" :
+               base == 20 ? "SPEED >1 rad/s FOR 100 ms" : "TRACKING ERROR >0.35 rad");
+    }
+  }
+  _rearStageStatus->setText(QString("Rear test: %1%2")
+      .arg(rearStage >= 0 && rearStage <= 7 ? rearNames[rearStage] : "UNKNOWN")
+      .arg(rearFault ? " | " + rearFaultText : QString()));
   const bool autoPassiveRecent =
       _lastAutoPassiveMs && now - _lastAutoPassiveMs < 30000;
   if (autoPassiveRecent)
     _modeStatus->setText(_modeStatus->text() + "\nAUTO PASSIVE: " +
                          _lastAutoPassiveReason);
+  if (rearFault && _requestedMode != kPassive) {
+    _lastAutoPassiveReason = rearFaultText;
+    _lastAutoPassiveMs = now;
+    requestPassive();
+  }
 
   const char* safetyNames[] = {"OK", "GUI LOST", "BOARD 1.0 ERROR",
-                               "BOARD 1.1 ERROR", "BOTH BOARDS ERROR"};
-  if (safetyReason >= 1 && safetyReason <= 4) {
+                               "BOARD 1.1 ERROR", "BOTH BOARDS ERROR",
+                               "REAR TEST SPI / FEEDBACK"};
+  if (safetyReason >= 1 && safetyReason <= 5) {
     _modeStatus->setText(_modeStatus->text() + "\nSAFETY: " +
                          safetyNames[safetyReason]);
     _modeStatus->setStyleSheet(
@@ -663,18 +750,16 @@ void Mit3hpControlPanel::refreshUi() {
         .arg(ok ? "#238636" : "#b42318"));
   }
 
-  const bool hardwareReady = ctrlMs && imuMs && statusMs &&
-      now - ctrlMs < 500 && now - imuMs < 300 &&
+  const bool hardwareReady = ctrlMs && statusMs &&
+      now - ctrlMs < 500 &&
       now - statusMs < 500 && watchdogOk && safetyReason == 0;
-  // SPI chi hien trang thai; mat GUI/controller/IMU van ve PASSIVE.
-  if (!hardwareReady && _requestedMode != kPassive) {
+  if (!hardwareReady && _requestedMode != kPassive && _requestedMode != kStandUp) {
     QString reason;
     const auto addReason = [&](const QString& part) {
       if (!reason.isEmpty()) reason += ", ";
       reason += part;
     };
     if (!ctrlMs || now - ctrlMs >= 500) addReason("CONTROLLER >500 ms");
-    if (!imuMs || now - imuMs >= 300) addReason("VECTORNAV >300 ms");
     if (!statusMs || now - statusMs >= 500) addReason("STATUS >500 ms");
     if (!watchdogOk) addReason("WATCHDOG GUI");
     if (safetyReason != 0)
@@ -685,8 +770,10 @@ void Mit3hpControlPanel::refreshUi() {
                          << _lastAutoPassiveReason;
     requestPassive();
   }
-  const bool legDataReady = legDataMs && now - legDataMs < 100;
-  _standButton->setEnabled(hardwareReady && legDataReady && actualMode == kPassive);
+  _standButton->setEnabled(ctrlMs && statusMs && now - ctrlMs < 500 &&
+      now - statusMs < 500 && actualMode == kPassive);
+  _rearPoseButton->setEnabled(rearStage == 2);
+  _airTrotButton->setEnabled(rearStage == 4);
   _balanceButton->setEnabled(false);
   _walkButton->setEnabled(false);
   _gaitSelector->setEnabled(false);
@@ -708,10 +795,11 @@ void Mit3hpControlPanel::refreshUi() {
           signs[joint][leg], 0.f, ratios[joint],
           static_cast<float>(spi.flags[leg])};
       for (int column = 0; column < 11; column++) {
-        auto* item = _motorTable->item(idx, column + 1);
+        const int tableColumn = column == 0 ? 1 : column + 2;
+        auto* item = _motorTable->item(idx, tableColumn);
       if (!item) {
         item = new QTableWidgetItem;
-          _motorTable->setItem(idx, column + 1, item);
+          _motorTable->setItem(idx, tableColumn, item);
       }
         item->setText(QString::number(values[column], 'f', 3));
         const bool boardFresh = boardAgeMs[leg / 2] >= 0 &&
@@ -725,6 +813,20 @@ void Mit3hpControlPanel::refreshUi() {
           cellColor = QColor("#fca5a5");
         item->setBackground(cellColor);
       }
+      auto* angleItem = _motorTable->item(idx, 2);
+      if (!angleItem) {
+        angleItem = new QTableWidgetItem;
+        _motorTable->setItem(idx, 2, angleItem);
+      }
+      const bool angleFresh = legDataFresh && boardAgeMs[leg / 2] >= 0 &&
+          boardAgeMs[leg / 2] <= 100;
+      angleItem->setText(QString("%1 deg / %2 rad%3")
+          .arg(double(legData.q[idx]) * 57.29577951308232, 0, 'f', 2)
+          .arg(legData.q[idx], 0, 'f', 3)
+          .arg(angleFresh ? "" : " *"));
+      angleItem->setToolTip(angleFresh ? "Joint angle from recent SPI feedback."
+          : "STALE: last received angle, not a current physical measurement.");
+      angleItem->setBackground(QColor(angleFresh ? "#dcfce7" : "#fecaca"));
     }
   }
   _imuValues->setText(QString(

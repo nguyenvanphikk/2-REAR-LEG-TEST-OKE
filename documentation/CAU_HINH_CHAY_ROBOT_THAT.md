@@ -69,15 +69,16 @@ Motor: Steadywin GIM8108-6, nguồn danh định 24 V, hỗ trợ MIT control.
 | Trạng thái | Thay đổi | Tác động ngắn gọn |
 |---|---|---|
 | ✅ | SPI chuyển sang `/dev/spidev1.0` và `1.1` | Đúng chân SPI Jetson đang sử dụng |
-| ✅ | SPI 1 MHz, Mode 0, `cs_change=0` | Tốc độ thử nghiệm hiện tại; CS nhả sau mỗi transaction |
+| ✅ | SPI 1 MHz, Mode 0, `cs_change=0` | Chu kỳ lên lịch gửi 2 ms (danh định 500 Hz/board); hai gói 132 byte mất tối thiểu 2.112 ms ở 1 MHz nên tần số thực tế có thể thấp hơn; CS nhả sau mỗi transaction |
 | ✅ | Hai board truyền tuần tự | Không có hai thread cùng truyền SPI đồng thời |
 | ✅ | Kiểm tra ioctl đúng 132 byte và checksum | Gói lỗi không được đưa vào controller |
 | ✅ | Mutex snapshot command/data | Tránh controller đọc/ghi trộn dữ liệu giữa hai chu kỳ |
-| ✅ | Watchdog GUI 300 ms | Mất GUI → PASSIVE, xóa joystick, disable motor |
-| ⚠️ | Không có watchdog phản hồi SPI trên Jetson | SPI lỗi chỉ hiện cảnh báo, gói lỗi giữ mẫu hợp lệ gần nhất. Người vận hành xác nhận firmware đã nạp không còn tự cắt motor sau 5 gói lỗi; cần kiểm tra đúng phiên bản firmware trên cả hai board |
+| ⚠️ | Watchdog GUI 300 ms | Vẫn đo heartbeat nhưng không tự ngắt trong phép thử HR/HL mode STAND_UP; các mode khác vẫn áp dụng watchdog |
+| ⚠️ | Giám sát SPI trong phép thử HR/HL | Chỉ hiển thị chất lượng truyền; không tự ngắt hoặc khóa phép thử theo tuổi phản hồi/tỷ lệ lỗi |
 | ✅ | PASSIVE thực sự gửi `flags=0` | STM32 được yêu cầu disable motor |
 | ✅ | Bỏ tự chạy `JPosInitializer` | Bật chương trình không tự kéo chân qua pose Mini Cheetah cũ |
-| ⚠️ | Nút STAND_UP tạm là thử khớp bốn chân khi treo robot | Cả FR/FL/HR/HL nhận enable và q_des=[0,0,0.02] rad, Kp=5/Kd=0.2; không có đoạn tăng góc trung gian. Không còn tự ngắt theo tuổi phản hồi SPI hoặc ngưỡng q/qd. Giữ đến khi PASSIVE/E-STOP, mất GUI/IMU hoặc bảo vệ STM32; không phải tư thế đứng; Balance/Locomotion bị khóa |
+| ⚠️ | Phép thử treo HR/HL có ba bước | Từ góc đang đo chuyển chậm tới `[0,0,0.02]`, xác nhận, chuyển tới `[0,-0.8,1.6]`, xác nhận, rồi mới cho bước trong không khí. Chỉ HR/HL bật lực, FR/FL tắt; dùng pha trot gốc và Bézier, không dùng MPC/WBC |
+| ⚠️ | IMU tùy chọn chỉ trong phép thử treo | Chạy controller với `MIT3HP_REAR_TEST_NO_IMU=1` để bỏ khởi động VectorNav; khi đó code khóa các mode ngoài PASSIVE/STAND_UP |
 | ✅ | Offset Jetson của 12 khớp bằng 0 | Phù hợp phương án set-zero motor tại pose chân duỗi thẳng |
 | ✅ | Tỷ số truyền model 6/6/9 | Phản ánh hộp số motor và đai knee 1.5:1 |
 | ✅ | Knee scale có độ lớn `1/1.5` | Quy đổi feedback đầu ra motor sang góc khớp knee |
@@ -217,6 +218,13 @@ cd /home/hp3/robot_project/Cheetah-Software-MIT/jetson-build
 sudo LD_LIBRARY_PATH=. ./user/MIT_Controller/mit_ctrl m r f
 ```
 
+Nếu **không cắm IMU** và chỉ thử HR/HL khi robot treo, dùng lệnh Terminal 2 này thay thế:
+
+```bash
+cd /home/hp3/robot_project/Cheetah-Software-MIT/jetson-build
+sudo env MIT3HP_REAR_TEST_NO_IMU=1 LD_LIBRARY_PATH=. ./user/MIT_Controller/mit_ctrl m r f
+```
+
 Ý nghĩa:
 
 ```text
@@ -232,20 +240,26 @@ lần bật máy sau chỉ cần chạy hai lệnh trên, không cần build l�
 
 1. Treo robot để bốn chân không chạm đất và chuẩn bị E-stop vật lý.
 2. Bật Jetson/STM32 với nguồn công suất motor chưa enable.
-3. Mở GUI; kiểm tra Controller, VectorNav, SPI và bộ đếm lỗi từng board. Màu xanh XOR chưa xác nhận STM32 có nguồn.
+3. Mở GUI; kiểm tra Controller, SPI và bộ đếm lỗi từng board. VectorNav có thể không cắm chỉ khi dùng tùy chọn thử treo. Màu xanh XOR chưa xác nhận STM32 đã thực thi lệnh.
 4. Chạy controller; robot phải ở PASSIVE, motor mềm, không tự chạy pose.
 5. Test từng motor với giới hạn thấp; ghi mapping, dấu và zero đủ 12 khớp.
-6. Kiểm tra watchdog GUI và E-stop vật lý; Jetson hiện không có watchdog mất SPI.
-7. Chỉ thử nút khớp bốn chân 0/0/0.02 khi robot được treo, đủ 12 khớp đã kiểm tra zero/chiều và hai board SPI có phản hồi ổn định. Phần mềm không còn tự kiểm tra các điều kiện q/qd và tuổi SPI này trước/trong khi thử; người vận hành phải kiểm tra chúng. Cả bốn chân đều có lực; bấm PASSIVE/E-STOP để tắt lực.
-8. Hoàn thiện đủ 12 phản hồi motor, mapping, chiều, zero và SPI trước khi khôi phục chuyển động.
+6. Kiểm tra watchdog GUI, phản hồi SPI hai board và E-stop vật lý trước khi bật lực.
+7. Bấm `PREPARE`: HR/HL đi từ góc đang đo tới `[0,0,0.02]` trong ít nhất 10 giây rồi giữ; xa hơn thì tự kéo dài thời gian để giới hạn tốc độ. Chờ GUI hiện `PREPARED / HOLD` và quan sát thực tế. Phép thử không kiểm tra giới hạn góc trên Jetson; giới hạn abad/hip theo firmware STM32 đang nạp, knee theo cấu hình firmware thực tế. Đã bỏ ngắt theo ngưỡng vận tốc và sai lệch bám góc để chẩn đoán phép thử. Trong phép thử HR/HL đã bỏ tự ngắt do quá thời gian tới đích, SPI và heartbeat GUI; vẫn ngắt khi feedback không hữu hạn. Nếu GUI mất kết nối, motor có thể tiếp tục giữ lệnh cuối; cần dùng ngắt nguồn motor vật lý khi không gửi được PASSIVE/E-STOP; GUI ghi tên khớp/lý do và terminal controller ghi q, qd, góc lệnh.
+8. Bấm `MOVE HR/HL TO ...`: chuyển tới `[0,-0.8,1.6]` trong ít nhất 15 giây, tự kéo dài nếu cần, rồi giữ. Chờ GUI hiện `POSE / HOLD`.
+9. Bấm `AIR TROT`, sau đó giữ joystick chuyển động lệch lên/xuống để HR/HL bước lệch pha 180°. Dùng độ cao Bézier 6 cm và nhịp thử nhanh hơn bản 8 giây đúng 15 lần: chu kỳ 0.533 giây, pha vung 0.267 giây, đạt đỉnh sau 0.133 giây kể từ đầu pha vung. Biên độ trước–sau vẫn tối đa 10 mm theo joystick. Đây là bài thử treo, không dùng lực tiếp đất MPC/WBC. Thả joystick để về tư thế giữ chậm; bấm PASSIVE để tắt lực. Robot luôn phải được treo. Tốc độ này nhanh hơn nhiều so với bản thử 8 giây trước đó.
+
+Xác nhận tới đích PREPARE/MOVE: cả sáu khớp HR/HL phải lệch góc đích dưới 6.5 độ (khoảng 0.11345 rad) liên tục 0.5 giây, sau khi hoàn thành thời gian chuyển động. Ngưỡng này dùng để mở bước tiếp theo; không đổi góc đích.
+
+Phép thử HR/HL hiện dùng Kp=8 và Kd=0.4 cho cả ba khớp để thử tăng độ cứng và giảm chấn; đây là mức thử chưa xác nhận tối ưu trên phần cứng. FR/FL vẫn tắt lực. SPI hiện chạy 1 MHz; thời gian quỹ đạo PREPARE/MOVE giữ nguyên.
+
+Cột `Joint q [rad]` là feedback STM32 đã đổi dấu/scale trên Jetson, không phải góc rotor nguyên bản. Cột `Joint angle [deg / rad]` hiển thị cùng q dưới hai đơn vị: độ = rad × 180/π. Mốc 0 theo encoder và offset đang cấu hình; cần xác nhận đơn vị firmware, tỷ số truyền và zero trước khi coi là góc cơ khí thực. Dấu `*` và nền đỏ báo giá trị cũ khi mất phản hồi SPI.
 
 ## 10. Hành vi an toàn cần nhớ
 
 - PASSIVE nghĩa là controller ngừng giữ tư thế và gửi `flags=0`; robot có thể
   hạ xuống hoặc ngã vì trọng lực.
 - E-stop GUI là E-stop phần mềm, không thay thế nút ngắt nguồn/enable vật lý.
-- Mất GUI quá 300 ms sẽ yêu cầu về PASSIVE. Jetson không còn tự chuyển PASSIVE
-  theo tuổi phản hồi SPI hoặc q/qd trong phép thử bốn chân.
+- Phép thử HR/HL không tự ngắt do mất GUI, lỗi SPI, vận tốc, sai lệch bám hoặc quá thời gian tới đích. Motor có thể tiếp tục giữ lệnh cuối khi mất kết nối. Dữ liệu NaN/Inf và lỗi tính quỹ đạo vẫn dừng phép thử.
 - Firmware đang nạp có thể khác file nguồn trên ổ đĩa. Người vận hành xác nhận
   bản đã nạp đã bỏ tự cắt lực sau 5 gói SPI lỗi; không dựa vào bảo vệ này.
   Khi đường truyền lỗi, dùng E-stop hoặc ngắt lực vật lý.
@@ -254,7 +268,7 @@ lần bật máy sau chỉ cần chạy hai lệnh trên, không cần build l�
 
 ## 11. Quản lý mã nguồn
 
-- Tên nhánh Git đang dùng là `thu-2-chan-truoc`; phép thử hiện tại đã đổi thành phép thử khớp bốn chân 0/0/0.02.
+- Tên nhánh Git đang dùng là `thu-2-chan-truoc`; commit `629fede` lưu phép thử bốn chân, còn working tree hiện tại dùng phép thử treo HR/HL ba bước.
 - Mã STM32 SPINDE nằm ngoài repository này; kiểm tra phiên bản đã nạp cho
   từng board trước khi thử motor.
 - Không đưa các thư mục `build-sim/`, `jetson-build/`,
